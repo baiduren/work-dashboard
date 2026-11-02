@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { attemptLogin } from "../lib/auth/login";
-import { LoginRateLimiter } from "../lib/auth/ratelimit";
+import {
+  clientKeyFromRequest,
+  LOGIN_MAX_FAILURES,
+  LoginRateLimiter,
+} from "../lib/auth/ratelimit";
 import { deriveSessionKey, verifySessionToken } from "../lib/auth/session";
 
 // 登录成功 / 失败 / 限流的整体流程（docs/02-acceptance.md「认证验收」）。
@@ -103,7 +107,7 @@ describe("attemptLogin", () => {
       limiter,
       now: T0,
     });
-    expect(limited).toEqual({ ok: false, reason: "limited" });
+    expect(limited).toEqual({ ok: false, reason: "limited", retryAfterSeconds: 15 * 60 });
   });
 
   it("成功登录重置失败计数：4 次失败 + 成功 + 4 次失败仍可登录", async () => {
@@ -141,7 +145,7 @@ describe("attemptLogin", () => {
       limiter,
       now: T0 + 15 * 60 * 1000 - 1,
     });
-    expect(during).toEqual({ ok: false, reason: "limited" });
+    expect(during).toEqual({ ok: false, reason: "limited", retryAfterSeconds: 1 });
     const after = await attemptLogin({
       username: "admin",
       password: "correct-horse",
@@ -153,9 +157,9 @@ describe("attemptLogin", () => {
     expect(after.ok).toBe(true);
   });
 
-  it("不同来源的失败互不牵连", async () => {
+  it("账号维度未达阈值时，其他来源仍可正常登录", async () => {
     const limiter = freshLimiter();
-    await failNTimes(limiter, 5);
+    await failNTimes(limiter, LOGIN_MAX_FAILURES - 1); // admin 从 CLIENT 失败 4 次
     const other = await attemptLogin({
       username: "admin",
       password: "correct-horse",
@@ -165,5 +169,163 @@ describe("attemptLogin", () => {
       now: T0,
     });
     expect(other.ok).toBe(true);
+  });
+
+  it("换 IP 撞同一账号：账号维度达到阈值后，换来源的正确凭据也被拒", async () => {
+    const limiter = freshLimiter();
+    for (let i = 0; i < LOGIN_MAX_FAILURES; i++) {
+      const result = await attemptLogin({
+        username: "admin",
+        password: "wrong",
+        clientKey: `203.0.113.${i}`,
+        config: CONFIG,
+        limiter,
+        now: T0,
+      });
+      expect(result).toEqual({ ok: false, reason: "invalid" });
+    }
+    const blocked = await attemptLogin({
+      username: "admin",
+      password: "correct-horse",
+      clientKey: "198.51.100.9",
+      config: CONFIG,
+      limiter,
+      now: T0,
+    });
+    expect(blocked).toEqual({ ok: false, reason: "limited", retryAfterSeconds: 15 * 60 });
+  });
+
+  it("同一来源换账号撞库：来源维度达到阈值后，换账号也被拒", async () => {
+    const limiter = freshLimiter();
+    for (let i = 0; i < LOGIN_MAX_FAILURES; i++) {
+      const result = await attemptLogin({
+        username: `user-${i}`,
+        password: "wrong",
+        clientKey: CLIENT,
+        config: CONFIG,
+        limiter,
+        now: T0,
+      });
+      expect(result).toEqual({ ok: false, reason: "invalid" });
+    }
+    const blocked = await attemptLogin({
+      username: "another-user",
+      password: "correct-horse",
+      clientKey: CLIENT,
+      config: CONFIG,
+      limiter,
+      now: T0,
+    });
+    expect(blocked).toEqual({ ok: false, reason: "limited", retryAfterSeconds: 15 * 60 });
+  });
+
+  it("伪造 X-Forwarded-For 轮换不产生新的限流键（缺省 unknown 照常累计）", async () => {
+    const limiter = freshLimiter();
+    for (let i = 0; i < LOGIN_MAX_FAILURES; i++) {
+      const result = await attemptLogin({
+        username: `u${i}`, // 每次换账号，只有来源维度会累计
+        password: "wrong",
+        clientKey: clientKeyFromRequest(
+          new Headers({ "x-forwarded-for": `10.0.0.${i}, 192.168.1.1` }),
+        ),
+        config: CONFIG,
+        limiter,
+        now: T0,
+      });
+      expect(result).toEqual({ ok: false, reason: "invalid" });
+    }
+    const limited = await attemptLogin({
+      username: "u5",
+      password: "wrong",
+      clientKey: clientKeyFromRequest(new Headers({ "x-forwarded-for": "172.16.0.1" })),
+      config: CONFIG,
+      limiter,
+      now: T0,
+    });
+    expect(limited).toEqual({ ok: false, reason: "limited", retryAfterSeconds: 15 * 60 });
+  });
+
+  it("全局失败阈值触发后，正确凭据也被拒绝（Retry-After 取全局窗口）", async () => {
+    const limiter = new LoginRateLimiter({ globalMaxFailures: 2 });
+    for (let i = 0; i < 2; i++) {
+      await attemptLogin({
+        username: `u${i}`,
+        password: "wrong",
+        clientKey: `203.0.113.${i}`,
+        config: CONFIG,
+        limiter,
+        now: T0,
+      });
+    }
+    const blocked = await attemptLogin({
+      username: "admin",
+      password: "correct-horse",
+      clientKey: "198.51.100.1",
+      config: CONFIG,
+      limiter,
+      now: T0,
+    });
+    expect(blocked).toEqual({ ok: false, reason: "limited", retryAfterSeconds: 10 * 60 });
+  });
+
+  it("成功登录同时重置来源与账号两个维度的失败计数", async () => {
+    const limiter = freshLimiter();
+    // 同一账号在 4 个不同来源各失败 1 次：账号维度 4 次、各来源各 1 次
+    for (let i = 0; i < LOGIN_MAX_FAILURES - 1; i++) {
+      await attemptLogin({
+        username: "admin",
+        password: "wrong",
+        clientKey: `203.0.113.${i}`,
+        config: CONFIG,
+        limiter,
+        now: T0,
+      });
+    }
+    const first = await attemptLogin({
+      username: "admin",
+      password: "correct-horse",
+      clientKey: "203.0.113.9",
+      config: CONFIG,
+      limiter,
+      now: T0,
+    });
+    expect(first.ok).toBe(true);
+    // 两个维度都已重置，再积累 4 次失败仍不会限流
+    for (let i = 0; i < LOGIN_MAX_FAILURES - 1; i++) {
+      await attemptLogin({
+        username: "admin",
+        password: "wrong",
+        clientKey: `203.0.113.${i}`,
+        config: CONFIG,
+        limiter,
+        now: T0,
+      });
+    }
+    const second = await attemptLogin({
+      username: "admin",
+      password: "correct-horse",
+      clientKey: "203.0.113.9",
+      config: CONFIG,
+      limiter,
+      now: T0,
+    });
+    expect(second.ok).toBe(true);
+  });
+
+  it("非字符串账号不产生账号维度限流键，仅按来源计数", async () => {
+    const limiter = freshLimiter();
+    for (let i = 0; i < LOGIN_MAX_FAILURES; i++) {
+      await attemptLogin({
+        username: { attacker: true },
+        password: "wrong",
+        clientKey: CLIENT,
+        config: CONFIG,
+        limiter,
+        now: T0,
+      });
+    }
+    expect(limiter.isLimited(CLIENT, T0)).toBe(true);
+    // 账号维度键不存在：isLimited("user:...") 为 false
+    expect(limiter.isLimited("user:admin", T0)).toBe(false);
   });
 });

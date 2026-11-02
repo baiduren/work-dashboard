@@ -49,8 +49,25 @@ npm run dev          # 启动开发服务器，默认 http://localhost:3000
 - 未配置或密钥过短时应用按“未认证”处理（fail closed），登录接口返回 500；
 - 会话 Cookie 为 HMAC-SHA256 签名，`HttpOnly`、`SameSite=Lax`，生产环境 `Secure`，有效期 7 天；
   换 secret 或改密码即全体会话失效；
-- 登录限流：同一来源 15 分钟内连续失败 5 次后返回 429，冷却后可再试（单实例内存实现）；
+- 登录限流（单实例内存实现，记录数有上限）：
+  - 同一来源 15 分钟内连续失败 5 次后返回 429，冷却后可再试；
+  - 同时按 **来源 + 账号** 双键计数：只换 IP 或只换账号的轮换都无法绕过已达阈值的另一维度；
+  - 全局失败阈值：10 分钟内累计失败达 100 次后暂时拒绝所有登录尝试，防分布式撞库；
+- 登录接口只接受 `Content-Type: application/json` 的请求（否则 400），请求体最大 1KB（超限 413）；
+  错误响应只含固定文案，不含堆栈或配置信息；
 - 公网部署必须经 HTTPS 代理（`Secure` Cookie 依赖 TLS），代理终止 TLS。
+
+### 反向代理要求（登录限流依赖）
+
+限流键只信任**代理注入**的来源地址，客户端伪造 `X-Forwarded-For` 无法绕过限流。
+部署反向代理时必须：
+
+- **设置 `X-Real-IP`** 为真实客户端地址（nginx 示例：`proxy_set_header X-Real-IP $remote_addr;`）；
+  未设置时回退读取 `CF-Connecting-IP`（Cloudflare），两者都没有则按 `unknown` 限流；
+- **覆盖（而非追加）`X-Forwarded-For`**：使用 `proxy_set_header X-Forwarded-For $remote_addr;`，
+  不要用 `$proxy_add_x_forwarded_for`（追加模式会保留客户端伪造的链）；
+  应用不读取 XFF 生成限流键；
+- 经多级代理时，由最外层（面向互联网的）代理设置上述两个头，内层代理不得透传客户端可控的同名头。
 
 ## Docker 部署
 
