@@ -73,6 +73,13 @@ describe("middleware 访问控制", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("未登录访问任务接口子路径 /api/tasks/:id 也返回 401 JSON", async () => {
+    const response = await middleware(request("/api/tasks/task-123"));
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "未登录" });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("放行 /login 与 /api/auth/login", async () => {
     expect(await passed(await middleware(request("/login")))).toBe(true);
     expect(await passed(await middleware(request("/api/auth/login")))).toBe(true);
