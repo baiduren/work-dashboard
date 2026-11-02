@@ -1,0 +1,18 @@
+# 一键启动：docker compose up --build（默认 http://localhost:3000）
+# 数据持久化在命名卷 work-dashboard-data（容器内 /app/data/dashboard.db）。
+# 设计依据：docs/adr/0002-docker-deployment.md
+services:
+  dashboard:
+    build: .
+    image: work-dashboard:local
+    container_name: work-dashboard
+    ports:
+      - "${WORK_DASHBOARD_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: file:/app/data/dashboard.db
+    volumes:
+      - work-dashboard-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  work-dashboard-data:

@@ -1,0 +1,49 @@
+# work-dashboard 生产镜像（多阶段构建，见 docs/adr/0002-docker-deployment.md）
+# syntax=docker/dockerfile:1
+
+# ---- 阶段 1：安装全部依赖并产出生产构建 ----
+FROM node:20-slim AS build
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+# postinstall 会执行 prisma generate，需要先提供 schema
+COPY package.json package-lock.json ./
+COPY prisma/schema.prisma ./prisma/
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# ---- 阶段 2：仅安装运行期依赖（prisma CLI 用于启动时迁移）----
+FROM node:20-slim AS prod-deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY prisma/schema.prisma ./prisma/
+RUN npm ci --omit=dev
+
+# ---- 阶段 3：运行镜像（非 root，数据落在挂载卷 /app/data）----
+FROM node:20-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0 \
+    DATABASE_URL=file:/app/data/dashboard.db
+# prisma 的 schema engine（migrate deploy）需要 libssl/openssl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json next.config.ts ./
+COPY prisma ./prisma
+COPY public ./public
+COPY --from=build /app/.next ./.next
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY docker/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh \
+    && mkdir -p /app/data \
+    && chown -R node:node /app
+USER node
+VOLUME /app/data
+EXPOSE 3000
+# 只要 HTTP 服务能响应即视为存活（骨架阶段尚无页面路由，返回 404 也算启动成功）
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/').then(()=>process.exit(0)).catch(()=>process.exit(1))"
+ENTRYPOINT ["./entrypoint.sh"]

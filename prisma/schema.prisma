@@ -8,7 +8,9 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  // 数据库地址由环境变量注入：本地开发用 .env（见 .env.example），
+  // Docker 部署由容器运行时覆盖为挂载卷路径（见 docs/adr/0002-docker-deployment.md）。
+  url      = env("DATABASE_URL")
 }
 
 model Project {

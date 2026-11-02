@@ -52,4 +52,6 @@ docs/                   产品与设计文档（本目录）
 
 - 本地单用户：无认证，禁止把服务暴露到公网；
 - 无网络依赖：不调用第三方 API；
-- 数据可移植：提供 JSON 导出 / 导入脚本。
+- 数据可移植：提供 JSON 导出 / 导入脚本；
+- 支持 Docker 部署：启动时自动执行 `prisma migrate deploy`，SQLite 数据持久化在挂载卷，
+  数据库地址由 `DATABASE_URL` 注入（见 [ADR-0002](adr/0002-docker-deployment.md)）。

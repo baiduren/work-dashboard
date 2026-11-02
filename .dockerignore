@@ -1,0 +1,32 @@
+# 让镜像只携带运行所需的源码与构建产物（构建阶段 COPY . . 使用）
+.git
+.github
+.gitignore
+.gitattributes
+.idea
+.vscode
+
+# 依赖与构建产物（镜像内重新安装/生成）
+node_modules
+.next
+out
+coverage
+
+# 本地数据库与环境（运行期由容器环境变量与挂载卷提供）
+*.db
+*.db-journal
+.env
+.env.*
+!.env.example
+
+# 仅本地使用的文件
+docs
+tests
+*.log
+*.tmp
+*.bak
+
+# Docker 自身文件
+Dockerfile
+docker-compose.yml
+.dockerignore
