@@ -72,9 +72,12 @@ docs/                   产品与设计文档（本目录）
 
 ## 接口约定（草案）
 
-- `GET /api/tasks?view=today|project|board` 返回列表；
-- `POST /api/tasks`、`PATCH /api/tasks/:id`、`DELETE /api/tasks/:id`；
-- 失败返回 `{ error }`，成功返回资源本身；
+- `GET /api/tasks?view=today|overdue|undated|board|project[&projectId=…]` 返回列表
+  （`board` 返回按状态分组的结构；`project` 必须带 `projectId`；`view` 缺失或非法 → 400）；
+- `POST /api/tasks`、`GET /api/tasks/:id`、`PATCH /api/tasks/:id`、`DELETE /api/tasks/:id`；
+- `POST /api/tasks/:id/move`：body `{ status, orderIndex }`，按领域规则移动并在事务内
+  重排同列顺序（移动后各列 orderIndex 连续、无重复）；
+- 失败返回 `{ error }`，成功返回资源本身；API 响应统一带 `Cache-Control: no-store`；
 - 所有写操作在服务端校验字段与状态取值（`status` 仅 `todo|doing|done`，`priority` 仅
   `low|medium|high`），非法值抛出可识别错误（`lib/domain` 的 `TaskValidationError`），调用方据此返回 400；
 - 状态迁移允许任意直接切换（看板拖拽，含 `done → todo/doing` 的“取消完成”）：
