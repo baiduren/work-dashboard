@@ -1,13 +1,14 @@
 # 01 架构
 
-> 状态：**提案**。ADR-0001 确认前，改动技术栈需要新的 ADR。
+> 状态：已确认。技术栈经 [ADR-0001](adr/0001-stack.md) 与 [ADR-0003](adr/0003-ui-components.md)
+> 于 2026-11-02 确认接受；改动技术栈或新增依赖仍需新的 ADR。
 
-## 技术栈（提案）
+## 技术栈
 
 | 层 | 选择 | 理由 |
 | --- | --- | --- |
 | 框架 | Next.js（App Router）+ TypeScript | 单进程即可同时提供页面和 API，部署简单 |
-| UI | Tailwind CSS | 快速构建，无额外运行时 |
+| UI | Tailwind CSS + shadcn/ui + dnd-kit + Tremor | Tailwind 为基础（[ADR-0001](adr/0001-stack.md)）；shadcn/ui 提供通用组件，dnd-kit 支撑看板拖拽，Tremor 提供统计图表（[ADR-0003](adr/0003-ui-components.md)） |
 | 数据 | SQLite + Prisma | 本地文件数据库，迁移可版本化 |
 | 测试 | Vitest + Playwright（端到端一条） | 与 Next 生态契合 |
 

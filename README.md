@@ -12,10 +12,12 @@
 - [03 约定](docs/03-conventions.md)
 - [ADR-0001 技术栈](docs/adr/0001-stack.md)
 - [ADR-0002 Docker 部署](docs/adr/0002-docker-deployment.md)
+- [ADR-0003 技术栈确认与 UI 组件选型](docs/adr/0003-ui-components.md)
 
 ## 技术栈
 
-Next.js（App Router）+ TypeScript + Tailwind CSS + Prisma + SQLite（见 [ADR-0001](docs/adr/0001-stack.md)）。
+Next.js（App Router）+ TypeScript + Tailwind CSS + Prisma + SQLite（见 [ADR-0001](docs/adr/0001-stack.md)）；
+UI 组件选型 shadcn/ui + dnd-kit + Tremor（见 [ADR-0003](docs/adr/0003-ui-components.md)，随后续 UI 工单安装）。
 
 ## 本地运行
 

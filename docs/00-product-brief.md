@@ -45,6 +45,6 @@
 
 ## 开放问题
 
-- 技术栈：见 [ADR-0001](../adr/0001-stack.md)（提议，待确认）；
+- 技术栈：已确认（[ADR-0001](adr/0001-stack.md)、[ADR-0003](adr/0003-ui-components.md)）；
 - 是否需要登录：MVP 默认无（仅本机）；
 - 部署形态：本机单进程运行，支持 Docker 一键部署（见 [ADR-0002](adr/0002-docker-deployment.md)）。
