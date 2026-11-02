@@ -37,9 +37,16 @@ docs/                   产品与设计文档（本目录）
 - 登录成功写入 **HMAC-SHA256 签名的会话 Cookie**：`httpOnly`、`sameSite=lax`、生产环境 `secure`，
   有效期 7 天，含用户名与签发/过期时间；改密或换 secret 即全体失效；
 - `middleware.ts` 保护**所有**路由：页面未登录重定向到 `/login?next=…`，`/api/*` 未登录返回 401；
-  放行清单只有 `/login`、`/api/auth/login`、静态资源；
-- 退出接口清除 Cookie；登录失败返回 401，并对同一来源做**限流**（如 15 分钟内 5 次），
-  密码比较使用恒定时间算法；
+  放行清单只有 `/login`、`/api/auth/login`、静态资源（`/_next/*`、`/favicon.ico` 与
+  **扩展名白名单**文件：png/jpg/jpeg/svg/css/js/webp/woff/woff2/ico；
+  其余路径——含「最后一段带点」的——一律走认证，防止未来新增 `/api/tasks.json` 之类路径被放行）；
+- 退出接口清除 Cookie；登录失败返回 401，并做**限流**（如 15 分钟内 5 次）：
+  限流键只信任代理注入的来源头（`X-Real-IP` → `CF-Connecting-IP`，都缺失记为 `unknown`，
+  不取客户端可伪造的 `X-Forwarded-For`），并按 **来源 + 账号** 双键计数（防单一维度轮换），
+  另有全局失败阈值（10 分钟 100 次失败后全局拒绝一段时间）；限流记录数有上限
+  （满员先清理过期项、再按插入顺序淘汰最旧项），部署要求见 README「反向代理要求」。
+  密码比较使用恒定时间算法；登录请求体限定 `application/json` 且 ≤ 1KB，
+  错误响应不含堆栈或配置信息；
 - 变更类请求校验 `Origin`/`Host` 一致，配合 `sameSite=lax` 防 CSRF；
 - 不做用户表、注册、找回密码：单用户凭据只存在于部署环境变量。
 

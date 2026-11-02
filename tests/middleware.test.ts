@@ -78,10 +78,30 @@ describe("middleware 访问控制", () => {
     expect(await passed(await middleware(request("/api/auth/login")))).toBe(true);
   });
 
-  it("放行静态资源", async () => {
+  it("放行静态资源（/_next/*、favicon.ico 与扩展名白名单文件）", async () => {
     expect(await passed(await middleware(request("/favicon.ico")))).toBe(true);
     expect(await passed(await middleware(request("/_next/static/chunk.js")))).toBe(true);
+    expect(await passed(await middleware(request("/_next/webpack-hmr")))).toBe(true);
     expect(await passed(await middleware(request("/logo.png")))).toBe(true);
+    expect(await passed(await middleware(request("/images/photo.jpeg")))).toBe(true);
+    expect(await passed(await middleware(request("/fonts/inter.woff2")))).toBe(true);
+  });
+
+  it("扩展名大小写不敏感", async () => {
+    expect(await passed(await middleware(request("/LOGO.PNG")))).toBe(true);
+  });
+
+  it("带点路径的扩展名不在白名单内时不放行（不再按「含点」放行）", async () => {
+    expect((await middleware(request("/api/tasks.json"))).status).toBe(401);
+    expect((await middleware(request("/notes/2026.11.02"))).status).toBe(302);
+    expect((await middleware(request("/files/archive.zip"))).status).toBe(302);
+    expect((await middleware(request("/api/tasks.JSON"))).status).toBe(401);
+  });
+
+  it("点开头或无扩展名的路径不放行", async () => {
+    expect((await middleware(request("/.env"))).status).toBe(302);
+    expect((await middleware(request("/.well-known/x"))).status).toBe(302);
+    expect((await middleware(request("/tasks"))).status).toBe(302);
   });
 
   it("有效会话访问页面与 API 放行", async () => {
