@@ -1,0 +1,55 @@
+// 个人工作台数据模型，字段依据 docs/01-architecture.md「数据模型（草案）」。
+// 注意：SQLite 数据源不支持 enum，status / priority 的合法取值
+// （todo|doing|done，low|medium|high）由 lib/domain 的纯逻辑约束，后续工单实现。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Project {
+  id       String  @id @default(cuid())
+  name     String
+  color    String?
+  archived Boolean @default(false)
+  tasks    Task[]
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  title       String
+  notes       String?
+  status      String    @default("todo") // todo | doing | done
+  priority    String    @default("medium") // low | medium | high
+  dueDate     DateTime?
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  orderIndex  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+  tags        TaskTag[]
+
+  @@index([projectId])
+  @@index([status, orderIndex])
+}
+
+model Tag {
+  id    String    @id @default(cuid())
+  name  String    @unique
+  color String?
+  tasks TaskTag[]
+}
+
+model TaskTag {
+  taskId String
+  tagId  String
+  task   Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag    Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+}

@@ -22,3 +22,14 @@ logs/
 # Temp / backup files
 *.tmp
 *.bak
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Prisma SQLite 本地数据库（不入库）
+*.db
+*.db-journal
