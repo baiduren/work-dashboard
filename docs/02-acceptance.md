@@ -26,6 +26,19 @@
 引用 docs/01-architecture.md 的相关小节；若有偏离，说明原因或新增 ADR。
 ```
 
+## 认证验收（登录与会话，[ADR-0004](adr/0004-authentication.md)）
+
+- [ ] 未登录访问 `/`（或其他页面）→ 302 跳转 `/login?next=…`；
+- [ ] 未登录访问 `/api/*` → 401 JSON（不返回业务数据）；
+- [ ] 正确账号 + 密码登录 → 进入目标页，会话 Cookie 带 `HttpOnly`、`SameSite=Lax`，
+      生产环境带 `Secure`；
+- [ ] 错误密码 → 401，且不下发会话 Cookie；
+- [ ] 同一来源连续失败达到阈值后被限流（429 或等价拒绝），冷却后可再试；
+- [ ] 手工篡改 / 截断 Cookie 后视为未登录（签名校验生效）；
+- [ ] 退出后会话立即失效，再访问回到登录页；
+- [ ] 日志中不出现密码、session secret、完整 Cookie；
+- [ ] 变更类请求校验 `Origin` 与 `Host` 一致（跨站请求被拒）。
+
 ## 通用门槛（每个 PR 都要满足）
 
 - [ ] `lint`、`typecheck`、`test`、`build` 全部通过；
