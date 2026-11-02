@@ -16,14 +16,33 @@
 
 ```
 app/                    Next.js 路由（页面与 route handlers）
+  login/                登录页
+  api/auth/             登录 / 退出接口
 components/             UI 组件（展示型，不直接访问数据库）
 lib/
+  auth/                 会话签名、校验、限流
   domain/               领域逻辑（任务状态机、排序规则）
   db/                   数据库访问层（Prisma client 封装）
 prisma/
   schema.prisma         数据模型与迁移
+middleware.ts           全局访问控制（未登录一律拦截）
 docs/                   产品与设计文档（本目录）
 ```
+
+## 认证与访问控制（[ADR-0004](adr/0004-authentication.md)）
+
+单用户、账号 + 密码，应用内实现，不接第三方身份服务：
+
+- 凭据来自环境变量：`AUTH_USERNAME`、`AUTH_PASSWORD`、`AUTH_SESSION_SECRET`（≥32 字符）；
+- 登录成功写入 **HMAC-SHA256 签名的会话 Cookie**：`httpOnly`、`sameSite=lax`、生产环境 `secure`，
+  有效期 7 天，含用户名与签发/过期时间；改密或换 secret 即全体失效；
+- `middleware.ts` 保护**所有**路由：页面未登录重定向到 `/login?next=…`，`/api/*` 未登录返回 401；
+  放行清单只有 `/login`、`/api/auth/login`、静态资源；
+- 退出接口清除 Cookie；登录失败返回 401，并对同一来源做**限流**（如 15 分钟内 5 次），
+  密码比较使用恒定时间算法；
+- 变更类请求校验 `Origin`/`Host` 一致，配合 `sameSite=lax` 防 CSRF；
+- 不做用户表、注册、找回密码：单用户凭据只存在于部署环境变量。
+
 
 ## 数据模型（草案）
 
@@ -51,8 +70,9 @@ docs/                   产品与设计文档（本目录）
 
 ## 非功能约定
 
-- 本地单用户：无认证，禁止把服务暴露到公网；
-- 无网络依赖：不调用第三方 API；
+- 认证：单用户账号 + 密码，Cookie 会话；公网必须经 **HTTPS 代理**（代理终止 TLS），
+  禁止匿名访问任何页面与 API（见 [ADR-0004](adr/0004-authentication.md)）；
+- 无网络依赖：不调用第三方 API（认证不引入外部身份服务）；
 - 数据可移植：提供 JSON 导出 / 导入脚本；
 - 支持 Docker 部署：启动时自动执行 `prisma migrate deploy`，SQLite 数据持久化在挂载卷，
   数据库地址由 `DATABASE_URL` 注入（见 [ADR-0002](adr/0002-docker-deployment.md)）。

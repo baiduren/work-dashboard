@@ -4,6 +4,9 @@
 
 当前为项目骨架阶段：技术栈与目录已就绪，页面与业务功能由后续工单实现。
 
+应用需登录后使用（单用户账号 + 密码，见 [ADR-0004](docs/adr/0004-authentication.md)）；
+公网部署必须经 HTTPS 代理。
+
 ## 设计文档
 
 - [00 产品概要](docs/00-product-brief.md)
@@ -13,6 +16,7 @@
 - [ADR-0001 技术栈](docs/adr/0001-stack.md)
 - [ADR-0002 Docker 部署](docs/adr/0002-docker-deployment.md)
 - [ADR-0003 技术栈确认与 UI 组件选型](docs/adr/0003-ui-components.md)
+- [ADR-0004 认证与访问控制](docs/adr/0004-authentication.md)
 
 ## 技术栈
 
