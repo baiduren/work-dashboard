@@ -56,8 +56,10 @@ docs/                   产品与设计文档（本目录）
 ## 模块边界
 
 - **页面 / 组件**：只负责展示与交互，不直接读写数据库；
-- **lib/domain**：任务状态与排序等纯逻辑，可单测；
-- **lib/db**：唯一的数据访问入口（Prisma）；
+- **lib/domain**：任务状态与排序等纯逻辑，可单测（`lib/domain/task.ts`：取值校验、
+  completedAt 语义、看板移动计算、今日归类；日期边界可注入当前时间）；
+- **lib/db**：唯一的数据访问入口（Prisma）；任务数据的读写函数在 `lib/db/tasks.ts`，
+  所有写操作用事务保证一致；
 - **route handlers**：参数校验后调用 domain/db，不承载业务分支。
 - 新增依赖或跨层调用必须先写 ADR。
 
@@ -66,7 +68,10 @@ docs/                   产品与设计文档（本目录）
 - `GET /api/tasks?view=today|project|board` 返回列表；
 - `POST /api/tasks`、`PATCH /api/tasks/:id`、`DELETE /api/tasks/:id`；
 - 失败返回 `{ error }`，成功返回资源本身；
-- 所有写操作在服务端校验状态迁移（todo→doing→done）是否合法。
+- 所有写操作在服务端校验字段与状态取值（`status` 仅 `todo|doing|done`，`priority` 仅
+  `low|medium|high`），非法值抛出可识别错误（`lib/domain` 的 `TaskValidationError`），调用方据此返回 400；
+- 状态迁移允许任意直接切换（看板拖拽，含 `done → todo/doing` 的“取消完成”）：
+  进入 `done` 写入 `completedAt`，离开 `done` 清空，`done → done` 保留首次完成时间。
 
 ## 非功能约定
 
