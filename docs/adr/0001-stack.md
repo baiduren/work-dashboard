@@ -1,6 +1,6 @@
-# ADR-0001：技术栈选择（提案）
+# ADR-0001：技术栈选择
 
-- 状态：**提议（Proposed）**
+- 状态：**已接受（Accepted）**（2026-11-02 经 [Issue #8](https://github.com/baiduren/work-dashboard/issues/8) 确认；UI 组件选型见 [ADR-0003](0003-ui-components.md)）
 - 日期：2026-11-02
 
 ## 背景
@@ -16,7 +16,10 @@
 - Prisma 提供可版本化的迁移；
 - Tailwind 减少样式层的运行时依赖。
 
-## 备选方案
+## 备选方案（已否决）
+
+2026-11-02 经产品负责人确认：采用 Next.js 方案，以下备选方案**全部否决**，不再保留为候选项
+（[Issue #8](https://github.com/baiduren/work-dashboard/issues/8)）。此表仅作否决记录保留。
 
 | 方案 | 优点 | 缺点 |
 | --- | --- | --- |
@@ -30,6 +33,8 @@
 - 代价：后续若需多人协作/云同步，SQLite 需迁移到 Postgres（届时新增 ADR）；
 - 约束：MVP 不做登录，服务只绑定本机地址。
 
-## 待确认
+## 确认记录
 
-- 是否接受该技术栈；若不接受，需改为 Vite + FastAPI 方案并在本 ADR 追加说明。
+- 2026-11-02：产品负责人在 [Issue #8](https://github.com/baiduren/work-dashboard/issues/8)
+  确认接受本方案，并否决全部备选方案；UI 组件选型（shadcn/ui + dnd-kit + Tremor）
+  见 [ADR-0003](0003-ui-components.md)。
