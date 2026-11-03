@@ -100,6 +100,40 @@ docker compose down            # 停止；数据保留在命名卷中
 - 直接 `docker run`：镜像内置 `ENV TZ=Asia/Shanghai`，可用 `-e TZ=…` 覆盖；
 - 暂不做每用户时区配置（后续在用户设置里再做）。
 
+### 使用 Docker Hub 镜像
+
+CI 在 `main` 的每次推送（且 checks 全过）后自动构建并推送镜像：
+
+- `<DockerHub 用户名>/work-dashboard:latest`：随 `main` 更新；
+- `sha-<短哈希>`：每次构建的可追溯标签；
+- `v1.2.3` / `1.2`：推送 `v*` 形式的 tag 时额外生成。
+
+```bash
+docker run -d --name work-dashboard -p 3000:3000 \
+  -v work-dashboard-data:/app/data \
+  -e AUTH_USERNAME=admin \
+  -e AUTH_PASSWORD='your-password' \
+  -e AUTH_SESSION_SECRET='<至少 32 字符的随机串>' \
+  <DockerHub 用户名>/work-dashboard:latest
+```
+
+也可以把 `docker-compose.yml` 里的 `build: .` 换成
+`image: <DockerHub 用户名>/work-dashboard:latest`，直接用已发布的镜像部署。
+
+### 发布镜像（维护者一次性配置）
+
+1. 在 [Docker Hub](https://hub.docker.com) 创建仓库 `work-dashboard`（与 GitHub 仓库同名，public/private 均可）；
+2. Docker Hub → Account Settings → Personal access tokens → **New Access Token**（权限选 **Read & Write**）；
+3. 在 GitHub 仓库 Settings → Secrets and variables → Actions 里添加：
+   - `DOCKERHUB_USERNAME`：Docker Hub 用户名；
+   - `DOCKERHUB_TOKEN`：上一步生成的 Access Token（不要用账号密码）；
+   - 可选：在 **Variables** 里加 `DOCKERHUB_REPOSITORY` 覆盖镜像仓库名（默认 `work-dashboard`）；
+4. 配置完成后，推送到 `main` 会在 checks 通过后自动发布；打 `v1.0.0` 这类 tag 会额外发布版本标签；
+5. 未配置 secrets 时，`docker` job 会明确报错提示缺哪个 secret（不会推送任何镜像）。
+
+> 镜像默认只构建 `linux/amd64`；需要 arm64（Apple Silicon 服务器/树莓派）时，在
+> `.github/workflows/ci.yml` 的 `platforms` 加上 `linux/arm64`，并启用 `docker/setup-qemu-action@v3`。
+
 ### 常用脚本
 
 | 命令 | 说明 |
