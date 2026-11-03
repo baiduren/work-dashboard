@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { getCurrentUsername } from "@/lib/auth/current-user";
 
@@ -9,8 +10,8 @@ export const metadata: Metadata = {
   description: "本地优先的个人任务工作台",
 };
 
-// 最小应用外壳（Issue #21）：顶栏仅放应用名与当前登录账号名，不做导航链接。
-// 未登录 / 会话无效（如登录页）时只显示应用名。
+// 最小应用外壳（Issue #21；Issue #27 增加页面导航）：登录后顶栏提供「今日 / 项目」导航，
+// 未登录 / 会话无效（如登录页）时只显示应用名（导航随会话隐藏）。
 export default async function RootLayout({
   children,
 }: Readonly<{
@@ -22,7 +23,25 @@ export default async function RootLayout({
       <body className="flex min-h-screen flex-col bg-neutral-50 text-neutral-900 antialiased">
         <header className="border-b border-neutral-200 bg-white">
           <div className="mx-auto flex h-14 w-full max-w-3xl items-center justify-between gap-3 px-4">
-            <span className="text-sm font-semibold text-neutral-900">个人工作台</span>
+            <div className="flex min-w-0 items-center gap-5">
+              <span className="text-sm font-semibold text-neutral-900">个人工作台</span>
+              {username ? (
+                <nav aria-label="页面导航" className="flex items-center gap-4">
+                  <Link
+                    href="/"
+                    className="text-sm text-neutral-600 hover:text-neutral-900"
+                  >
+                    今日
+                  </Link>
+                  <Link
+                    href="/projects"
+                    className="text-sm text-neutral-600 hover:text-neutral-900"
+                  >
+                    项目
+                  </Link>
+                </nav>
+              ) : null}
+            </div>
             {username ? (
               <span className="max-w-[10rem] truncate text-sm text-neutral-500" title={username}>
                 {username}

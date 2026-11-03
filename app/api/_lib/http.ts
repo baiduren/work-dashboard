@@ -1,11 +1,13 @@
 // API route handlers 共用的响应与错误映射（docs/01-architecture.md「接口约定」）：
 // - 成功返回资源本身；失败统一 `{ error: string }` 并带正确状态码；
-// - TaskValidationError → 400、TaskNotFoundError → 404，其余一律 500 固定文案，不泄露堆栈；
+// - TaskValidationError → 400、TaskNotFoundError / ProjectNotFoundError → 404，
+//   其余一律 500 固定文案，不泄露堆栈；
 // - 所有响应带 `Cache-Control: no-store`。
 // 下划线开头的目录不参与 Next.js 路由，仅供本目录下的 route handlers 导入。
 
 import { NextResponse } from "next/server";
 
+import { ProjectNotFoundError } from "@/lib/db/projects";
 import { TaskNotFoundError } from "@/lib/db/tasks";
 import { TaskValidationError } from "@/lib/domain/task";
 
@@ -24,10 +26,11 @@ export function jsonError(status: number, error: string): NextResponse {
 /**
  * 把领域/数据层异常映射为响应（docs/01-architecture.md「接口约定」）：
  * TaskValidationError（可识别的校验错误）→ 400，message 面向调用方；
- * TaskNotFoundError → 404；未知错误 → 500 固定文案，不携带堆栈或内部信息。
+ * TaskNotFoundError / ProjectNotFoundError → 404；未知错误 → 500 固定文案，不携带堆栈或内部信息。
  */
 export function toErrorResponse(error: unknown): NextResponse {
   if (error instanceof TaskValidationError) return jsonError(400, error.message);
   if (error instanceof TaskNotFoundError) return jsonError(404, error.message);
+  if (error instanceof ProjectNotFoundError) return jsonError(404, error.message);
   return jsonError(500, "服务器内部错误");
 }

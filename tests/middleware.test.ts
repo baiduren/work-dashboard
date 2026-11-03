@@ -111,6 +111,14 @@ describe("middleware 访问控制", () => {
     expect((await middleware(request("/tasks"))).status).toBe(302);
   });
 
+  it("项目页面与项目接口同样被拦截（Issue #27）", async () => {
+    expect((await middleware(request("/projects"))).status).toBe(302);
+    expect((await middleware(request("/projects/proj-1"))).status).toBe(302);
+    const api = await middleware(request("/api/projects"));
+    expect(api.status).toBe(401);
+    expect(await api.json()).toEqual({ error: "未登录" });
+  });
+
   it("有效会话访问页面与 API 放行", async () => {
     const cookie = await validCookie();
     expect(await passed(await middleware(request("/", { headers: { cookie } })))).toBe(true);

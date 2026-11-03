@@ -1,11 +1,12 @@
 "use client";
 
-// 编辑任务弹层（Issue #25）：原生 <dialog> 实现（无新增依赖，docs/adr/0003-ui-components.md）。
-// - 可编辑：标题、备注、优先级、截止日期（<input type="date">，可清空）；
+// 编辑任务弹层（Issue #25；Issue #27 增加「所属项目」下拉）：原生 <dialog> 实现（无新增依赖，docs/adr/0003-ui-components.md）。
+// - 可编辑：标题、备注、优先级、截止日期（<input type="date">，可清空）、所属项目
+//   （下拉数据来自 GET /api/projects，含「无项目」项；清空则保存 projectId=null）；
 // - 打开时预填当前值；showModal 提供模态焦点与 Esc 关闭，关闭后焦点回到触发元素；
 // - 保存 → PATCH /api/tasks/:id；标题经 lib/domain parseTitle 做客户端校验（复用取值规则，
 //   不重复实现服务端校验）；服务端 400 时在弹层内显示 { error } 文案且不关闭弹层；
-// - 取消 / Esc 不产生请求。
+// - 保存成功回调 onSaved（父级借此 router.refresh() 同步任务行/项目计数），取消 / Esc 不产生请求。
 // 父级按 key=任务 id 渲染本组件，切换编辑对象时状态自然重置。
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -16,7 +17,24 @@ import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, parseTitle, TaskValidationError
 
 const FALLBACK_PRIORITY_LABEL = "中";
 
-export function EditTaskModal({ task, onClose }: { task: TaskListItem; onClose: () => void }) {
+/** 「所属项目」下拉的选项（来自 GET /api/projects；不含计数等展示字段）。 */
+interface ProjectOption {
+  id: string;
+  name: string;
+}
+
+/** 下拉第一项：值 "" 表示「无项目」，保存时映射为 projectId=null。 */
+const NO_PROJECT_VALUE = "";
+
+export function EditTaskModal({
+  task,
+  onClose,
+  onSaved,
+}: {
+  task: TaskListItem;
+  onClose: () => void;
+  onSaved?: () => void;
+}) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes ?? "");
@@ -26,6 +44,9 @@ export function EditTaskModal({ task, onClose }: { task: TaskListItem; onClose: 
       : DEFAULT_TASK_PRIORITY,
   );
   const [dueDate, setDueDate] = useState(task.dueDate ? formatLocalDate(task.dueDate) : "");
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState(task.projectId ?? NO_PROJECT_VALUE);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,6 +62,40 @@ export function EditTaskModal({ task, onClose }: { task: TaskListItem; onClose: 
       if (document.activeElement === document.body) {
         previouslyFocused?.focus();
       }
+    };
+  }, []);
+
+  // 拉取项目列表（打开弹层时一次）：失败时下拉只剩「无项目」，并给出可重试的提示文案。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/projects");
+        if (!response.ok) {
+          if (!cancelled) {
+            setProjectsError(await apiErrorMessage(response, "项目列表加载失败，保存前可重开弹层重试"));
+          }
+          return;
+        }
+        const data: unknown = await response.json();
+        if (cancelled || !Array.isArray(data)) return;
+        setProjects(
+          data
+            .filter(
+              (item): item is { id: string; name: string } =>
+                typeof item === "object" &&
+                item !== null &&
+                typeof (item as { id?: unknown }).id === "string" &&
+                typeof (item as { name?: unknown }).name === "string",
+            )
+            .map((item) => ({ id: item.id, name: item.name })),
+        );
+      } catch {
+        if (!cancelled) setProjectsError("项目列表加载失败，保存前可重开弹层重试");
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -71,10 +126,12 @@ export function EditTaskModal({ task, onClose }: { task: TaskListItem; onClose: 
           notes: notes.trim() === "" ? null : notes,
           priority,
           dueDate: dueDateInputToPatch(dueDate),
+          projectId: projectId === NO_PROJECT_VALUE ? null : projectId,
         }),
       });
       if (response.ok) {
         dialogRef.current?.close();
+        onSaved?.();
         onClose();
         return;
       }
@@ -169,6 +226,30 @@ export function EditTaskModal({ task, onClose }: { task: TaskListItem; onClose: 
               ) : null}
             </div>
           </div>
+        </div>
+        <div>
+          <label htmlFor="edit-task-project" className="block text-sm font-medium text-neutral-700">
+            所属项目
+          </label>
+          <select
+            id="edit-task-project"
+            value={projectId}
+            onChange={(event) => setProjectId(event.target.value)}
+            disabled={saving}
+            className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-900 disabled:opacity-60"
+          >
+            <option value={NO_PROJECT_VALUE}>无项目</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          {projectsError ? (
+            <p role="alert" className="mt-1 text-xs text-red-600">
+              {projectsError}
+            </p>
+          ) : null}
         </div>
         {error ? (
           <p role="alert" className="text-sm text-red-600">
