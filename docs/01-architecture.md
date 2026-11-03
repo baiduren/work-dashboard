@@ -34,8 +34,10 @@ docs/                   产品与设计文档（本目录）
 单用户、账号 + 密码，应用内实现，不接第三方身份服务：
 
 - 凭据来自环境变量：`AUTH_USERNAME`、`AUTH_PASSWORD`、`AUTH_SESSION_SECRET`（≥32 字符）；
-- 登录成功写入 **HMAC-SHA256 签名的会话 Cookie**：`httpOnly`、`sameSite=lax`、生产环境 `secure`，
-  有效期 7 天，含用户名与签发/过期时间；改密或换 secret 即全体失效；
+- 登录成功写入 **HMAC-SHA256 签名的会话 Cookie**：`httpOnly`、`sameSite=lax`，
+  `secure` 按请求协议决定（HTTPS / 代理 `X-Forwarded-Proto: https` 时为 true，纯 HTTP 部署为 false；
+  可用 `AUTH_COOKIE_SECURE` 强制覆盖），有效期 7 天，含用户名与签发/过期时间；
+  改密或换 secret 即全体失效；
 - `middleware.ts` 保护**所有**路由：页面未登录重定向到 `/login?next=…`，`/api/*` 未登录返回 401；
   放行清单只有 `/login`、`/api/auth/login`、静态资源（`/_next/*`、`/favicon.ico` 与
   **扩展名白名单**文件：png/jpg/jpeg/svg/css/js/webp/woff/woff2/ico；

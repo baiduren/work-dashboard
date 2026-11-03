@@ -19,6 +19,7 @@ beforeEach(() => {
     AUTH_USERNAME: process.env.AUTH_USERNAME,
     AUTH_PASSWORD: process.env.AUTH_PASSWORD,
     AUTH_SESSION_SECRET: process.env.AUTH_SESSION_SECRET,
+    AUTH_COOKIE_SECURE: process.env.AUTH_COOKIE_SECURE,
   };
   process.env.AUTH_USERNAME = USERNAME;
   process.env.AUTH_PASSWORD = PASSWORD;
@@ -64,6 +65,44 @@ describe("POST /api/auth/login 请求体约束", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     expect(response.headers.get("set-cookie")).toContain("wd_session=");
+  });
+
+  it("HTTP 请求下发的会话 Cookie 不带 Secure（HTTP 部署可登录并跳转）", async () => {
+    const response = await POST(
+      loginRequest({
+        body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
+        ip: "203.0.113.210",
+      }),
+    );
+    expect(response.status).toBe(200);
+    const cookie = response.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("wd_session=");
+    expect(cookie).not.toMatch(/; *Secure/i);
+  });
+
+  it("经 HTTPS 代理（x-forwarded-proto: https）时 Cookie 带 Secure", async () => {
+    const response = await POST(
+      loginRequest({
+        body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
+        ip: "203.0.113.211",
+        headers: { "x-forwarded-proto": "https" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie") ?? "").toMatch(/; *Secure/i);
+  });
+
+  it("AUTH_COOKIE_SECURE=false 可强制关闭 Secure（显式回退开关）", async () => {
+    process.env.AUTH_COOKIE_SECURE = "false";
+    const response = await POST(
+      loginRequest({
+        body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
+        ip: "203.0.113.212",
+        headers: { "x-forwarded-proto": "https" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie") ?? "").not.toMatch(/; *Secure/i);
   });
 
   it("Content-Type 带 charset 参数仍被接受（走到凭据校验）", async () => {

@@ -118,8 +118,11 @@ export async function verifySessionToken(
   return payload;
 }
 
-/** 会话 Cookie 属性：HttpOnly、SameSite=Lax、生产环境 Secure、7 天（docs/adr/0004-authentication.md）。 */
-export function sessionCookieAttributes(maxAgeSeconds: number): {
+/** 会话 Cookie 属性：HttpOnly、SameSite=Lax、默认生产环境 Secure、7 天（docs/adr/0004-authentication.md）。 */
+export function sessionCookieAttributes(
+  maxAgeSeconds: number,
+  options: { secure?: boolean } = {},
+): {
   name: string;
   httpOnly: true;
   sameSite: "lax";
@@ -131,8 +134,37 @@ export function sessionCookieAttributes(maxAgeSeconds: number): {
     name: SESSION_COOKIE_NAME,
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: options.secure ?? process.env.NODE_ENV === "production",
     path: "/",
     maxAge: maxAgeSeconds,
   };
+}
+
+/**
+ * 判断当前请求是否经由 HTTPS（含反向代理的 x-forwarded-proto）。
+ * 注意：x-forwarded-proto 的信任前提是代理会覆盖客户端传入的同名头，见 README「反向代理要求」。
+ */
+export function isSecureRequest(request: {
+  headers: Headers;
+  nextUrl?: { protocol: string };
+}): boolean {
+  const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  if (forwarded) return forwarded === "https";
+  return request.nextUrl?.protocol === "https:";
+}
+
+/**
+ * 会话 Cookie 的 Secure 决策：
+ * - `AUTH_COOKIE_SECURE=true/false` 显式覆盖；
+ * - 未设置时按请求协议自动判断——HTTPS（含代理）为 true，纯 HTTP 部署为 false，
+ *   否则浏览器会丢弃 Secure Cookie，表现为“登录成功但不跳转”（见 Issue）。
+ */
+export function secureCookieForRequest(request: {
+  headers: Headers;
+  nextUrl?: { protocol: string };
+}): boolean {
+  const override = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
+  if (override === "true") return true;
+  if (override === "false") return false;
+  return isSecureRequest(request);
 }

@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readAuthConfig } from "@/lib/auth/config";
 import { attemptLogin } from "@/lib/auth/login";
 import { clientKeyFromRequest, loginRateLimiter } from "@/lib/auth/ratelimit";
-import { SESSION_MAX_AGE_SECONDS, sessionCookieAttributes } from "@/lib/auth/session";
+import { SESSION_MAX_AGE_SECONDS, secureCookieForRequest, sessionCookieAttributes } from "@/lib/auth/session";
 
 /** 登录请求体大小上限：用户名 + 密码足够，同时防止超大请求体消耗内存。 */
 const MAX_BODY_BYTES = 1024;
@@ -112,6 +112,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const response = NextResponse.json({ ok: true });
-  response.cookies.set({ ...sessionCookieAttributes(SESSION_MAX_AGE_SECONDS), value: result.token });
+  // Secure 属性按实际请求协议决定（HTTPS/代理 → true，纯 HTTP 部署 → false），
+  // 否则浏览器会丢弃 Cookie，登录后仍被中间件判定未登录、跳回登录页。
+  response.cookies.set({
+    ...sessionCookieAttributes(SESSION_MAX_AGE_SECONDS, { secure: secureCookieForRequest(request) }),
+    value: result.token,
+  });
   return response;
 }
