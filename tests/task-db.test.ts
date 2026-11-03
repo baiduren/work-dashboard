@@ -13,6 +13,7 @@ import {
   TaskNotFoundError,
   updateStatus,
   updateTask,
+  updateTaskWithStatus,
   type TaskRecord,
 } from "../lib/db/tasks";
 import { classifyForToday, TaskValidationError, type TaskStatus } from "../lib/domain/task";
@@ -259,6 +260,133 @@ describe("updateStatus", () => {
     await expect(updateStatus("no-such-id", "done", NOW)).rejects.toBeInstanceOf(
       TaskNotFoundError,
     );
+  });
+});
+
+describe("updateTaskWithStatus", () => {
+  it("字段 + status 单事务生效：status 变更追加到目标列末尾，原列收紧为 0..n-1", async () => {
+    await createTask({ title: "A" }, NOW);
+    const b = await createTask({ title: "B" }, NOW);
+    await createTask({ title: "C" }, NOW);
+    await createTask({ title: "X", status: "doing" }, NOW);
+
+    const updated = await updateTaskWithStatus(b.id, { title: "B2" }, "doing", NOW);
+    expect(updated.title).toBe("B2");
+    expect(updated.status).toBe("doing");
+    expect(updated.orderIndex).toBe(1); // 目标列长度（移入前 doing 只有 X）＝追加到末尾
+
+    const todo = await column("todo");
+    expect(todo.map((t) => [t.title, t.orderIndex])).toEqual([
+      ["A", 0],
+      ["C", 1],
+    ]);
+    const doing = await column("doing");
+    expect(doing.map((t) => [t.title, t.orderIndex])).toEqual([
+      ["X", 0],
+      ["B2", 1],
+    ]);
+    for (const rows of [todo, doing]) {
+      expect(new Set(rows.map((t) => t.orderIndex)).size).toBe(rows.length);
+      expect(rows.map((t) => t.orderIndex)).toEqual(rows.map((_, i) => i));
+    }
+  });
+
+  it("目标列已有任务时 status 变更：被移动任务在末尾，两列无重复（Issue #23 场景）", async () => {
+    // 目标列（doing）已有 orderIndex=0 的任务；todo 列共 3 个
+    await createTask({ title: "X", status: "doing" }, NOW);
+    await createTask({ title: "A" }, NOW);
+    const b = await createTask({ title: "B" }, NOW);
+    await createTask({ title: "C" }, NOW);
+
+    const moved = await updateTaskWithStatus(b.id, {}, "doing", NOW);
+    expect(moved.orderIndex).toBe(1); // 追加到目标列末尾，不与已有 0 冲突
+
+    const todo = await column("todo");
+    const doing = await column("doing");
+    expect(todo.map((t) => [t.title, t.orderIndex])).toEqual([
+      ["A", 0],
+      ["C", 1],
+    ]);
+    expect(doing.map((t) => [t.title, t.orderIndex])).toEqual([
+      ["X", 0],
+      ["B", 1],
+    ]);
+  });
+
+  it("移入 done 写 completedAt，移出清空（沿用 applyStatusChange）", async () => {
+    const task = await createTask({ title: "A" }, NOW);
+    const doneAt = new Date(2026, 10, 2, 15, 0, 0);
+    const done = await updateTaskWithStatus(task.id, { notes: "备注" }, "done", doneAt);
+    expect(done.status).toBe("done");
+    expect(done.notes).toBe("备注");
+    expect(done.completedAt).toEqual(doneAt);
+
+    const back = await updateTaskWithStatus(task.id, {}, "todo", NOW);
+    expect(back.status).toBe("todo");
+    expect(back.completedAt).toBeNull();
+  });
+
+  it("status 与当前相同：只维护 completedAt，不改变列内位置", async () => {
+    const a = await createTask({ title: "A", status: "done" }, NOW);
+    const b = await createTask({ title: "B", status: "done" }, NOW);
+    const first = a.completedAt;
+    expect(first).toEqual(NOW);
+
+    const again = await updateTaskWithStatus(a.id, {}, "done", new Date(2026, 10, 3, 9, 0, 0));
+    expect(again.completedAt).toEqual(first); // done → done 保留首次完成时间
+    expect(again.orderIndex).toBe(0);
+
+    const done = await column("done");
+    expect(done.map((t) => [t.title, t.orderIndex])).toEqual([
+      ["A", 0],
+      ["B", 1],
+    ]);
+    expect(b.orderIndex).toBe(1);
+  });
+
+  it("status 缺省时只更新字段（等价 updateTask）", async () => {
+    const task = await createTask({ title: "A" }, NOW);
+    const updated = await updateTaskWithStatus(
+      task.id,
+      { title: "A2", priority: "high" },
+      undefined,
+      NOW,
+    );
+    expect(updated.title).toBe("A2");
+    expect(updated.priority).toBe("high");
+    expect(updated.status).toBe("todo");
+    expect(updated.orderIndex).toBe(0);
+  });
+
+  it("事务性：字段非法（projectId 不存在）整体回滚，status 与 completedAt 不落库", async () => {
+    const task = await createTask({ title: "A" }, NOW);
+    await expect(
+      updateTaskWithStatus(task.id, { projectId: "missing" }, "done", NOW),
+    ).rejects.toMatchObject({ name: "TaskValidationError", field: "projectId" });
+
+    const after = await getTask(task.id);
+    expect(after?.status).toBe("todo");
+    expect(after?.completedAt).toBeNull();
+    expect(after?.orderIndex).toBe(0);
+  });
+
+  it("空 patch 且无 status：原样返回当前任务，不改动", async () => {
+    const task = await createTask({ title: "A" }, NOW);
+    const same = await updateTaskWithStatus(task.id, {}, undefined, NOW);
+    expect(same.title).toBe("A");
+    expect(same.status).toBe("todo");
+    expect(same.orderIndex).toBe(0);
+  });
+
+  it("拒绝非法 status；任务不存在时抛 TaskNotFoundError", async () => {
+    const task = await createTask({ title: "A" }, NOW);
+    await expect(updateTaskWithStatus(task.id, {}, "paused", NOW)).rejects.toMatchObject({
+      name: "TaskValidationError",
+      field: "status",
+    });
+    await expect(
+      updateTaskWithStatus("no-such-id", { title: "x" }, "done", NOW),
+    ).rejects.toBeInstanceOf(TaskNotFoundError);
   });
 });
 

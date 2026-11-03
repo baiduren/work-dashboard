@@ -100,7 +100,7 @@ export async function getTask(id: string): Promise<TaskRecord | null> {
   return prisma.task.findUnique({ where: { id } });
 }
 
-/** updateTask 可更新的字段；其余字段（含 status）被忽略，状态变更走 updateStatus / moveTask。 */
+/** updateTask 可更新的字段；其余字段（含 status）被忽略，状态变更走 updateTaskWithStatus / moveTask。 */
 export interface UpdateTaskPatch {
   title?: string;
   notes?: string | null;
@@ -133,6 +133,8 @@ export async function updateTask(id: string, patch: UpdateTaskPatch): Promise<Ta
 /**
  * 更新状态：按领域规则维护 completedAt（进入 done 写入 now，离开 done 清空，
  * done → done 保留原完成时间）。status 非法抛 TaskValidationError；任务不存在抛 TaskNotFoundError。
+ * 注意：本函数不改列内顺序（orderIndex 不变）；PATCH 接口需要“字段 + 状态”单事务
+ * 且保持列内顺序一致时，使用 updateTaskWithStatus。
  */
 export async function updateStatus(
   id: string,
@@ -152,6 +154,69 @@ export async function updateStatus(
       where: { id },
       data: { status: nextTimestamps.status, completedAt: nextTimestamps.completedAt },
     });
+  });
+}
+
+/**
+ * 单事务完成“字段更新 + 状态变更”（PATCH /api/tasks/:id 的落库入口，Issue #23）：
+ * - status 未提供时只更新字段；status 与当前相同时只按领域规则维护 completedAt，
+ *   不改变列内位置；
+ * - status 变更（与当前不同）时语义等价于 POST /move { status, orderIndex: 目标列末尾 }：
+ *   离开原列后原列重排为 0..n-1，任务追加到目标列末尾（orderIndex = 目标列长度），
+ *   重排计算复用 lib/domain 的 computeMove，两列 orderIndex 连续、无重复；
+ * - completedAt 沿用 applyStatusChange（进入 done 写入，离开 done 清空，done→done 保留）；
+ * - 任一步失败（字段非法、项目不存在、任务不存在等）整体回滚，不会留下部分更新。
+ * 字段非法抛 TaskValidationError（调用方映射为 400）；任务不存在抛 TaskNotFoundError（404）。
+ */
+export async function updateTaskWithStatus(
+  id: string,
+  patch: UpdateTaskPatch,
+  status?: unknown,
+  now: Date = new Date(),
+): Promise<TaskRecord> {
+  const normalized = normalizeTaskPatch(patch);
+  const next = status === undefined ? null : parseStatus(status);
+  return prisma.$transaction(async (tx) => {
+    if (normalized.projectId !== undefined) {
+      await ensureProjectExists(tx, normalized.projectId);
+    }
+    const task = await tx.task.findUnique({ where: { id } });
+    if (!task) throw new TaskNotFoundError(id);
+
+    const data: Prisma.TaskUncheckedUpdateInput = { ...normalized };
+    if (next !== null) {
+      const currentStatus = parseStatus(task.status);
+      const nextTimestamps = applyStatusChange(
+        { status: currentStatus, completedAt: task.completedAt },
+        next,
+        now,
+      );
+      data.status = nextTimestamps.status;
+      data.completedAt = nextTimestamps.completedAt;
+
+      if (next !== currentStatus) {
+        // 状态变更：源列移出后收紧为 0..n-1，目标列插入位置取“目标列长度”（追加到末尾）。
+        const columnTasks = await tx.task.findMany({
+          where: { status: { in: [currentStatus, next] } },
+          select: { id: true, status: true, orderIndex: true },
+        });
+        const targetLength = columnTasks.filter(
+          (row) => parseStatus(row.status) === next,
+        ).length;
+        const plan = computeMove(
+          columnTasks.map(toBoardTaskRef),
+          id,
+          { status: next, position: targetLength },
+        );
+        for (const entry of plan.reorder) {
+          await tx.task.update({ where: { id: entry.id }, data: { orderIndex: entry.orderIndex } });
+        }
+        data.orderIndex = plan.orderIndex;
+      }
+    }
+
+    if (Object.keys(data).length === 0) return task; // 空 patch 且无 status：原样返回当前任务
+    return tx.task.update({ where: { id }, data });
   });
 }
 

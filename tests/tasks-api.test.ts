@@ -333,6 +333,48 @@ describe("PATCH /api/tasks/:id", () => {
     expect(body.completedAt).toBeNull();
   });
 
+  it("改 status：任务追加到目标列末尾，两列 orderIndex 连续且无重复（board 视图验证）", async () => {
+    await createTask({ title: "A" });
+    const b = await createTask({ title: "B" });
+    await createTask({ title: "C" });
+    await createTask({ title: "X", status: "doing" }); // 目标列已有 orderIndex=0
+
+    const res = await PATCH(jsonReq(`/api/tasks/${b.id}`, "PATCH", { status: "doing" }), ctx(b.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TaskJson;
+    expect(body.status).toBe("doing");
+    expect(body.orderIndex).toBe(1); // 目标列末尾
+
+    const view = await board();
+    expect(view.todo.map((task) => [task.title, task.orderIndex])).toEqual([
+      ["A", 0],
+      ["C", 1],
+    ]);
+    expect(view.doing.map((task) => [task.title, task.orderIndex])).toEqual([
+      ["X", 0],
+      ["B", 1],
+    ]);
+    for (const column of ["todo", "doing", "done"] as const) {
+      const indexes = view[column].map((task) => task.orderIndex).sort((p, q) => p - q);
+      expect(indexes).toEqual(indexes.map((_, i) => i));
+    }
+  });
+
+  it("单事务：字段非法（projectId 不存在）时 status 变更也不落库", async () => {
+    const task = await createTask({ title: "任务A" });
+    const res = await PATCH(
+      jsonReq(`/api/tasks/${task.id}`, "PATCH", { projectId: "missing-project", status: "done" }),
+      ctx(task.id),
+    );
+    expect(res.status).toBe(400);
+
+    const after = await getTask(task.id);
+    expect(after?.title).toBe("任务A");
+    expect(after?.status).toBe("todo");
+    expect(after?.completedAt).toBeNull();
+    expect(after?.orderIndex).toBe(0);
+  });
+
   it("未知字段 → 400 且不落库", async () => {
     const task = await createTask({ title: "任务A" });
     for (const patch of [{ orderIndex: 5 }, { foo: "bar" }, { id: "other" }]) {
