@@ -29,6 +29,7 @@ function toListItem(task: TaskRecord): TaskListItem {
     status: task.status,
     priority: task.priority,
     dueDate: task.dueDate,
+    projectId: task.projectId,
   };
 }
 

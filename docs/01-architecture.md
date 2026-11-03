@@ -65,7 +65,10 @@ docs/                   产品与设计文档（本目录）
 - **页面 / 组件**：只负责展示与交互，不直接读写数据库；
 - **lib/domain**：任务状态与排序等纯逻辑，可单测（`lib/domain/task.ts`：取值校验、
   completedAt 语义、看板移动计算、今日归类；日期边界可注入当前时间）；
+  项目取值校验在 `lib/domain/project.ts`（name 非空且 ≤60 字符、color 为 `#RRGGBB`
+  或 null、patch 只允许 name/color）；
 - **lib/db**：唯一的数据访问入口（Prisma）；任务数据的读写函数在 `lib/db/tasks.ts`，
+  项目数据的读写函数在 `lib/db/projects.ts`（未归档项目 + 各状态任务计数），
   所有写操作用事务保证一致；
 - **route handlers**：参数校验后调用 domain/db，不承载业务分支。
 - 新增依赖或跨层调用必须先写 ADR。
@@ -81,9 +84,19 @@ docs/                   产品与设计文档（本目录）
   两列 `orderIndex` 连续无重复；列内位置微调走 `/move`；
 - `POST /api/tasks/:id/move`：body `{ status, orderIndex }`，按领域规则移动并在事务内
   重排同列顺序（移动后各列 orderIndex 连续、无重复）；
+- `GET /api/projects`：返回未归档项目数组，每项含 `id / name / color / counts`
+  （counts 为该项目的 todo / doing / done 任务数与 total 合计）；空库返回 `[]`；
+- `POST /api/projects`：创建项目（name 必填、trim 后非空且 ≤60 字符；color 可选
+  `#RRGGBB` 或 null），成功 201 返回项目；
+- `GET /api/projects/:id`：存在返回项目，不存在 → 404；
+- `PATCH /api/projects/:id`：仅允许更新 `name / color`（未知字段 → 400；显式
+  `color=null` 清空颜色），项目不存在 → 404；项目名重复不拒绝（schema 未加唯一约束，
+  与任务标题同一策略）；项目归档 / 删除不在当前范围（后续工单）；
 - 失败返回 `{ error }`，成功返回资源本身；API 响应统一带 `Cache-Control: no-store`；
 - 所有写操作在服务端校验字段与状态取值（`status` 仅 `todo|doing|done`，`priority` 仅
   `low|medium|high`），非法值抛出可识别错误（`lib/domain` 的 `TaskValidationError`），调用方据此返回 400；
+  项目字段校验同样抛出 `TaskValidationError`（`TaskNotFoundError` / `ProjectNotFoundError`
+  均由 `toErrorResponse` 映射为 404）。
 - 状态迁移允许任意直接切换（看板拖拽，含 `done → todo/doing` 的“取消完成”）：
   进入 `done` 写入 `completedAt`，离开 `done` 清空，`done → done` 保留首次完成时间。
 

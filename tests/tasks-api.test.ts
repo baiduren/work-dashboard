@@ -9,6 +9,7 @@ import { DELETE, GET as getTaskRoute, PATCH } from "../app/api/tasks/[id]/route"
 import { POST as moveRoute } from "../app/api/tasks/[id]/move/route";
 import { GET as listRoute, POST as createRoute } from "../app/api/tasks/route";
 import { prisma } from "../lib/db";
+import { ProjectNotFoundError } from "../lib/db/projects";
 import { createTask, getTask, TaskNotFoundError } from "../lib/db/tasks";
 import { TaskValidationError } from "../lib/domain/task";
 
@@ -542,9 +543,10 @@ describe("POST /api/tasks/:id/move", () => {
 // ---------------------------------------------------------------------------
 
 describe("toErrorResponse", () => {
-  it("TaskValidationError → 400、TaskNotFoundError → 404", () => {
+  it("TaskValidationError → 400、TaskNotFoundError / ProjectNotFoundError → 404", () => {
     expect(toErrorResponse(new TaskValidationError("bad", "status")).status).toBe(400);
     expect(toErrorResponse(new TaskNotFoundError("t1")).status).toBe(404);
+    expect(toErrorResponse(new ProjectNotFoundError("p1")).status).toBe(404);
   });
 
   it("未知错误 → 500 固定文案，不泄露堆栈与内部信息", async () => {

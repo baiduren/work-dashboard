@@ -147,7 +147,14 @@ export function TodayBoard({ sections }: { sections: readonly TodaySectionData[]
         </section>
       ))}
 
-      {editing ? <EditTaskModal key={editing.id} task={editing} onClose={() => setEditing(null)} /> : null}
+      {editing ? (
+        <EditTaskModal
+          key={editing.id}
+          task={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => router.refresh()}
+        />
+      ) : null}
 
       {toast ? (
         <div

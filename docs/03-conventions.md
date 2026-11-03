@@ -17,6 +17,12 @@
 3. 设计依据（引用 docs/ 小节）；
 4. UI 变更的前后截图。
 
+截图 / 视觉证据在 PR 描述里必须用**绝对地址**引用（如
+`https://raw.githubusercontent.com/<owner>/<repo>/<head-sha>/docs/assets/<工单>/<name>.png`，
+指向该 PR 的 head 提交）。GitHub 会把 PR 描述中的相对路径解析到默认分支（`main`），
+而新截图只存在于功能分支，按相对路径写在合并前必然显示为坏图；
+后续截图更新时同步更新绝对地址。
+
 ## 代码
 
 - TypeScript 严格模式；禁止 `any`（确需时写注释说明）；
