@@ -1,9 +1,11 @@
-// 单个任务接口（docs/01-architecture.md「接口约定（草案）」、Issue #19）：
+// 单个任务接口（docs/01-architecture.md「接口约定（草案）」、Issue #19、Issue #23）：
 // - GET    /api/tasks/:id：存在返回任务，不存在 404；
 // - PATCH  /api/tasks/:id：更新 title/notes/priority/dueDate/projectId/status，
-//   未知字段或非法值 → 400。status 变更沿用领域规则维护 completedAt
-//   （进入 done 写入、离开 done 清空、done→done 保留首次时间），
-//   字段值经 lib/domain 归一化校验后经 lib/db 落库；列内重排走 /move；
+//   未知字段或非法值 → 400。字段更新与 status 变更经 lib/db 的 updateTaskWithStatus
+//   在同一事务内落库（任一步失败整体回滚，不留部分更新）；status 变更沿用领域规则
+//   维护 completedAt（进入 done 写入、离开 done 清空、done→done 保留首次时间），
+//   并把任务追加到目标列末尾、原列重排为 0..n-1（等价于 /move 移到列尾，
+//   保证两列 orderIndex 连续无重复）；列内位置微调仍走 /move；
 // - DELETE /api/tasks/:id：成功 204，不存在 404。
 // 认证由 middleware.ts 统一保护（未登录 401），本文件不新增认证逻辑。
 
@@ -19,8 +21,7 @@ import {
 import {
   deleteTask,
   getTask,
-  updateStatus,
-  updateTask,
+  updateTaskWithStatus,
   type TaskRecord,
 } from "@/lib/db/tasks";
 
@@ -78,9 +79,12 @@ export async function PATCH(request: NextRequest, context: RouteContext): Promis
 
   try {
     let task: TaskRecord | null = null;
-    if (Object.keys(patch).length > 0) task = await updateTask(id, patch);
-    if (nextStatus !== null) task = await updateStatus(id, nextStatus);
-    if (!task) task = await getTask(id); // 空 PATCH：不改动任何字段，返回当前任务
+    if (Object.keys(patch).length === 0 && nextStatus === null) {
+      task = await getTask(id); // 空 PATCH：不改动任何字段，返回当前任务
+    } else {
+      // 字段更新与状态变更（含列内重排）在同一事务内完成，不再拆成两次独立写入。
+      task = await updateTaskWithStatus(id, patch, nextStatus ?? undefined);
+    }
     if (!task) return jsonError(404, `任务不存在：${id}`);
     return jsonOk(task);
   } catch (error) {

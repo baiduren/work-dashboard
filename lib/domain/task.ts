@@ -365,7 +365,7 @@ export interface NormalizedTaskPatch {
 
 /**
  * 归一化更新补丁：只挑选可更新字段（其余字段——包括 status——一律忽略，
- * 状态变更必须走 updateStatus / moveTask）；未提供的字段不出现在结果里，
+ * 状态变更必须走 updateTaskWithStatus / moveTask）；未提供的字段不出现在结果里，
  * 显式 null 表示清空（dueDate / projectId）。输入不是对象时抛出 TaskValidationError。
  */
 export function normalizeTaskPatch(patch: unknown): NormalizedTaskPatch {

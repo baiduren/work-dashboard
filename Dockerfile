@@ -22,14 +22,18 @@ RUN npm ci --omit=dev
 # ---- 阶段 3：运行镜像（非 root，数据落在挂载卷 /app/data）----
 FROM node:20-slim AS runner
 WORKDIR /app
+# TZ 默认 Asia/Shanghai：今日/逾期边界与日期展示按服务器时区计算（Issue #23），
+# 直接 docker run 时可用 -e TZ=… 覆盖；compose 部署由 docker-compose.yml 注入。
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
+    TZ=Asia/Shanghai \
     DATABASE_URL=file:/app/data/dashboard.db
-# prisma 的 schema engine（migrate deploy）需要 libssl/openssl
+# prisma 的 schema engine（migrate deploy）需要 libssl/openssl；
+# tzdata 提供系统时区数据库，保证 TZ=Asia/Shanghai 生效（容器内 date / Node 本地时间）。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssl \
+    && apt-get install -y --no-install-recommends openssl tzdata \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json next.config.ts ./
 COPY prisma ./prisma

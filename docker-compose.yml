@@ -10,6 +10,9 @@ services:
       - "${WORK_DASHBOARD_PORT:-3000}:3000"
     environment:
       DATABASE_URL: file:/app/data/dashboard.db
+      # 时区（Issue #23）：今日/逾期边界与日期展示按服务器时区计算，
+      # 容器默认 Asia/Shanghai，宿主设置 TZ 环境变量（或 compose 同目录 .env）可覆盖。
+      TZ: ${TZ:-Asia/Shanghai}
       # 登录认证（docs/adr/0004-authentication.md）：凭据与密钥从宿主环境或同目录 .env 注入，
       # 缺少任一项 compose 将直接报错拒绝启动（fail closed）。
       AUTH_USERNAME: ${AUTH_USERNAME:?请在环境变量或 .env 中设置 AUTH_USERNAME}

@@ -90,6 +90,16 @@ docker compose down            # 停止；数据保留在命名卷中
 - 不用 Compose 时：`docker build -t work-dashboard .`，然后
   `docker run -p 3000:3000 -v work-dashboard-data:/app/data work-dashboard:local`。
 
+### 时区
+
+今日 / 已逾期分组与日期标题的边界按**服务器时区**计算（`lib/domain/task.ts` 的
+`startOfDay` / `endOfDay` 与展示组件的日期格式化都使用本地时区）。容器默认 `Asia/Shanghai`：
+
+- Compose 部署：`docker-compose.yml` 注入 `TZ: ${TZ:-Asia/Shanghai}`，宿主设置 `TZ`
+  环境变量（或 compose 同目录 `.env`）即可覆盖，例如 `TZ=Asia/Tokyo docker compose up -d`；
+- 直接 `docker run`：镜像内置 `ENV TZ=Asia/Shanghai`，可用 `-e TZ=…` 覆盖；
+- 暂不做每用户时区配置（后续在用户设置里再做）。
+
 ### 常用脚本
 
 | 命令 | 说明 |
