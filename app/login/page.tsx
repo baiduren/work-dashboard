@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function LoginPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-neutral-50 px-4">
+    <main className="flex flex-1 items-center justify-center bg-neutral-50 px-4">
       <Suspense fallback={null}>
         <LoginForm />
       </Suspense>
