@@ -20,7 +20,7 @@
 ## 验证方式
 - 命令：`npm run lint`、`npm run typecheck`、`npm test`、`npm run build`
 - 手工步骤：……
-- UI 变更：附前后截图（Before / After）
+- UI 变更：附前后截图（Before / After），PR 描述中用绝对地址引用（见 [03 约定](03-conventions.md#pr-描述)）
 
 ## 设计依据
 引用 docs/01-architecture.md 的相关小节；若有偏离，说明原因或新增 ADR。
