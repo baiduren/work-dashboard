@@ -92,6 +92,11 @@ docker compose down            # 停止；数据保留在命名卷中
 
 - SQLite 数据持久化在命名卷 `work-dashboard-data`（容器内 `/app/data/dashboard.db`），升级镜像不丢数据；
 - 端口映射默认 `3000`，可用 `WORK_DASHBOARD_PORT=8080 docker compose up -d` 修改；
+- 基础镜像固定为 `node:20-bookworm-slim`（Debian 12 / OpenSSL 3），三个构建阶段使用同一镜像引用，
+  Prisma Client 同时生成容器运行平台的引擎（`binaryTargets`，见 `prisma/schema.prisma`）；
+  **变更基础镜像或 Prisma 版本后必须完整重建**：`docker compose build --no-cache`，
+  避免构建缓存里旧平台（如 bullseye / OpenSSL 1.1）的镜像阶段与新运行环境混用，
+  导致 Query Engine 平台不匹配（Issue #35）；
 - 不用 Compose 时：`docker build -t work-dashboard .`，然后
   `docker run -p 3000:3000 -v work-dashboard-data:/app/data work-dashboard:local`。
 

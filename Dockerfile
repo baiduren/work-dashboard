@@ -2,7 +2,12 @@
 # syntax=docker/dockerfile:1
 
 # ---- 阶段 1：安装全部依赖并产出生产构建 ----
-FROM node:20-slim AS build
+# 基础镜像显式固定 Debian 版本（bookworm / OpenSSL 3.0，Issue #35）：
+# 浮动 tag `node:20-slim` 在 bullseye（OpenSSL 1.1）→ bookworm 迁移期间，
+# 构建缓存中的旧镜像与新拉取的镜像可能在同一构建的不同阶段混用，
+# 导致 `prisma generate` 产物与运行环境平台不一致（Query Engine 缺失）。
+# 三个阶段必须始终使用同一个镜像引用，改动时三个阶段一起改。
+FROM node:20-bookworm-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 # postinstall 会执行 prisma generate，需要先提供 schema
@@ -13,14 +18,14 @@ COPY . .
 RUN npm run build
 
 # ---- 阶段 2：仅安装运行期依赖（prisma CLI 用于启动时迁移）----
-FROM node:20-slim AS prod-deps
+FROM node:20-bookworm-slim AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY prisma/schema.prisma ./prisma/
 RUN npm ci --omit=dev
 
 # ---- 阶段 3：运行镜像（非 root，数据落在挂载卷 /app/data）----
-FROM node:20-slim AS runner
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 # TZ 默认 Asia/Shanghai：今日/逾期边界与日期展示按服务器时区计算（Issue #23），
 # 直接 docker run 时可用 -e TZ=… 覆盖；compose 部署由 docker-compose.yml 注入。
