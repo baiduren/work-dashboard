@@ -10,7 +10,8 @@ export const metadata: Metadata = {
   description: "本地优先的个人任务工作台",
 };
 
-// 最小应用外壳（Issue #21；Issue #27 增加页面导航）：登录后顶栏提供「今日 / 项目」导航，
+// 最小应用外壳（Issue #21；Issue #27 增加页面导航；Issue #31 增加「看板」导航）：
+// 登录后顶栏提供「今日 / 看板 / 项目」导航，
 // 未登录 / 会话无效（如登录页）时只显示应用名（导航随会话隐藏）。
 export default async function RootLayout({
   children,
@@ -32,6 +33,12 @@ export default async function RootLayout({
                     className="text-sm text-neutral-600 hover:text-neutral-900"
                   >
                     今日
+                  </Link>
+                  <Link
+                    href="/board"
+                    className="text-sm text-neutral-600 hover:text-neutral-900"
+                  >
+                    看板
                   </Link>
                   <Link
                     href="/projects"
