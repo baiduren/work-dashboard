@@ -1,16 +1,18 @@
 name: CI
 
 on:
+  # 只在 PR 上跑检查（分支保护要求该 status check，合并前必须通过）
   pull_request:
     branches: [main]
+  # 镜像发布触发：每天 21:00（Asia/Shanghai = 13:00 UTC）、手动、推 v* tag
   push:
-    branches: [main]
     tags: ["v*"]
-
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
 
