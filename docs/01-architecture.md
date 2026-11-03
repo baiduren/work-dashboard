@@ -71,6 +71,7 @@ docs/                   产品与设计文档（本目录）
   或 null、patch 只允许 name/color）；
 - **lib/db**：唯一的数据访问入口（Prisma）；任务数据的读写函数在 `lib/db/tasks.ts`，
   项目数据的读写函数在 `lib/db/projects.ts`（未归档项目 + 各状态任务计数），
+  全量备份的导出 / 导入在 `lib/db/backup.ts`，
   所有写操作用事务保证一致；
 - **route handlers**：参数校验后调用 domain/db，不承载业务分支。
 - 新增依赖或跨层调用必须先写 ADR。
@@ -106,11 +107,47 @@ docs/                   产品与设计文档（本目录）
 - 状态迁移允许任意直接切换（看板拖拽，含 `done → todo/doing` 的“取消完成”）：
   进入 `done` 写入 `completedAt`，离开 `done` 清空，`done → done` 保留首次完成时间。
 
+## 数据导出 / 导入（Issue #37）
+
+数据备份与完整恢复的实现约定（对应产品概要「支持导出为 JSON」与成功标准
+「导出 JSON 后清库再导入，可完整恢复」）：
+
+- `GET /api/export`：单事务内读取全量数据（`lib/db/backup.ts` 的 `exportAll`），
+  返回 `application/json` 附件下载，响应头带
+  `Content-Disposition: attachment; filename="work-dashboard-export-<YYYYMMDD-HHmmss>.json"`
+  （文件名时间戳取服务器本地时间）与 `Cache-Control: no-store`；
+- 备份文件结构（`version 1`）：
+  `{ version, exportedAt, projects, tasks, tags, taskTags }`；
+  - `version`：导出格式版本，当前为 `1`；导入只校验版本号是否为当前支持值，
+    **不做跨版本转换**（v1→v2 迁移属后续工单）；
+  - `exportedAt`：导出时间，ISO 8601 字符串；
+  - `projects`：id / name / color / archived 全字段（含已归档项目）；
+  - `tasks`：id / title / notes / status / priority / dueDate / projectId /
+    orderIndex / createdAt / updatedAt / completedAt 全字段；
+  - `tags` / `taskTags`：Tag / TaskTag 表当前无 API 产出，结构上保留
+    （正常为空数组），保证恢复后不丢结构；
+  - 所有日期字段一律 ISO 8601 字符串；
+- `POST /api/import`：body 为导出的同构 JSON；`importAll(data, { now })` 在
+  **单事务内先清空后导入**（删除顺序 taskTags → tags → tasks → projects，
+  写入顺序相反），整体成功或整体回滚，导入失败不破坏现有数据；
+  成功返回 `{ imported: { projects, tasks, tags, taskTags } }` 计数；
+  - 校验在触碰数据库之前完成：version 不支持、缺字段、类型不对、id 重复、
+    引用悬空（任务引用不存在的项目等）→ 抛 `TaskValidationError` → 400，
+    不落库；数据库唯一约束（如标签名重复）在事务内触发回滚后同样映射为 400；
+  - 校验通过后按原 id 原样写入：保留 cuid、orderIndex、completedAt 与
+    createdAt / updatedAt 原值（Prisma 显式提供这些字段时不会自动改写）；
+- `now` 参数为注入当前时间的签名约定（与 lib/db 其他写函数一致）：
+  当前格式的导入不产生新时间戳，该参数不参与落库，供未来增量合并沿用；
+- 认证由 middleware.ts 统一保护（未登录访问两个端点均 401），不新增认证逻辑；
+- 非目标：增量合并、冲突解决、按 id 去重合并、自动定时备份、云备份、
+  备份文件管理、跨版本迁移；标签管理 UI 属后续工单。
+
 ## 非功能约定
 
 - 认证：单用户账号 + 密码，Cookie 会话；公网必须经 **HTTPS 代理**（代理终止 TLS），
   禁止匿名访问任何页面与 API（见 [ADR-0004](adr/0004-authentication.md)）；
 - 无网络依赖：不调用第三方 API（认证不引入外部身份服务）；
-- 数据可移植：提供 JSON 导出 / 导入脚本；
+- 数据可移植：JSON 全量导出 / 导入（`GET /api/export`、`POST /api/import`，
+  见「数据导出 / 导入」小节），今日视图提供导出 / 导入入口；
 - 支持 Docker 部署：启动时自动执行 `prisma migrate deploy`，SQLite 数据持久化在挂载卷，
   数据库地址由 `DATABASE_URL` 注入（见 [ADR-0002](adr/0002-docker-deployment.md)）。

@@ -119,6 +119,27 @@ describe("middleware 访问控制", () => {
     expect(await api.json()).toEqual({ error: "未登录" });
   });
 
+  it("导出 / 导入接口同样被拦截（Issue #37）：未登录 401，登录后放行", async () => {
+    const exportResponse = await middleware(request("/api/export"));
+    expect(exportResponse.status).toBe(401);
+    expect(await exportResponse.json()).toEqual({ error: "未登录" });
+    expect(exportResponse.headers.get("cache-control")).toBe("no-store");
+
+    const importResponse = await middleware(request("/api/import", { method: "POST" }));
+    expect(importResponse.status).toBe(401);
+    expect(await importResponse.json()).toEqual({ error: "未登录" });
+
+    const cookie = await validCookie();
+    expect(
+      await passed(await middleware(request("/api/export", { headers: { cookie } }))),
+    ).toBe(true);
+    expect(
+      await passed(
+        await middleware(request("/api/import", { method: "POST", headers: { cookie } })),
+      ),
+    ).toBe(true);
+  });
+
   it("有效会话访问页面与 API 放行", async () => {
     const cookie = await validCookie();
     expect(await passed(await middleware(request("/", { headers: { cookie } })))).toBe(true);

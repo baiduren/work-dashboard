@@ -48,6 +48,22 @@
 - [ ] 非 `application/json` 登录请求返回 400，超过 1KB 的请求体返回 413，
       错误响应不含堆栈或配置信息。
 
+## 导出 / 导入验收（数据备份与完整恢复，Issue #37）
+
+- [ ] 未登录访问 `GET /api/export` / `POST /api/import` 返回 401（middleware 现有行为不变）；
+- [ ] `GET /api/export` 返回全量 JSON：字段完整（含 orderIndex、completedAt、
+      createdAt），日期为 ISO 字符串，带 `Content-Disposition: attachment`
+      下载头与 `Cache-Control: no-store`；
+- [ ] 导出 → 清库（deleteMany 全表）→ `POST /api/import` → 今日 / 项目 / 看板
+      三视图数据与导出前一致：任务内容、状态、优先级、截止日、项目归属、
+      看板列内顺序、完成时间全部恢复；
+- [ ] 导入 version 非法 / 缺 tasks 字段 / task 类型错误 → 400，且库内现有数据
+      不变（事务回滚可验证：导入失败后再 `GET /api/tasks?view=board` 数据与
+      导入前一致）；
+- [ ] UI：导出点击即下载；导入未确认（取消 confirm）不发起请求；导入成功后
+      页面刷新显示新数据；空库导入合法文件后页面正常；
+- [ ] `npm run lint` / `typecheck` / `test` / `build` 全绿。
+
 ## 通用门槛（每个 PR 都要满足）
 
 - [ ] `lint`、`typecheck`、`test`、`build` 全部通过；
