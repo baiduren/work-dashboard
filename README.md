@@ -102,11 +102,17 @@ docker compose down            # 停止；数据保留在命名卷中
 
 ### 使用 Docker Hub 镜像
 
-CI 在 `main` 的每次推送（且 checks 全过）后自动构建并推送镜像：
+镜像在以下时机构建并推送（每次都要求 checks 全过；PR 上只构建、不推送）：
 
-- `<DockerHub 用户名>/work-dashboard:latest`：随 `main` 更新；
-- `sha-<短哈希>`：每次构建的可追溯标签；
-- `v1.2.3` / `1.2`：推送 `v*` 形式的 tag 时额外生成。
+- **每日 21:00**（Asia/Shanghai，即 UTC 13:00）自动运行；
+- **手动触发**：Actions 页选择 `CI` → `Run workflow`；
+- **推送 `v*` tag**（如 `v1.0.0`）。
+
+镜像标签：
+
+- `<DockerHub 用户名>/work-dashboard:latest`：默认分支的定时 / 手动运行更新；
+- `sha-<短哈希>`：每次发布的可追溯标签；
+- `v1.2.3` / `1.2`：推送 `v*` tag 时生成。
 
 ```bash
 docker run -d --name work-dashboard -p 3000:3000 \
@@ -128,7 +134,7 @@ docker run -d --name work-dashboard -p 3000:3000 \
    - `DOCKERHUB_USERNAME`：Docker Hub 用户名；
    - `DOCKERHUB_TOKEN`：上一步生成的 Access Token（不要用账号密码）；
    - 可选：在 **Variables** 里加 `DOCKERHUB_REPOSITORY` 覆盖镜像仓库名（默认 `work-dashboard`）；
-4. 配置完成后，推送到 `main` 会在 checks 通过后自动发布；打 `v1.0.0` 这类 tag 会额外发布版本标签；
+4. 配置完成后，三种触发（每日 21:00 / 手动 / `v*` tag）都会在 checks 通过后发布；
 5. 未配置 secrets 时，`docker` job 会明确报错提示缺哪个 secret（不会推送任何镜像）。
 
 > 镜像默认只构建 `linux/amd64`；需要 arm64（Apple Silicon 服务器/树莓派）时，在
