@@ -83,7 +83,11 @@ docs/                   产品与设计文档（本目录）
   任务追加到目标列末尾、原列重排为 `0..n-1`（等价于 `/move` 移到列尾），
   两列 `orderIndex` 连续无重复；列内位置微调走 `/move`；
 - `POST /api/tasks/:id/move`：body `{ status, orderIndex }`，按领域规则移动并在事务内
-  重排同列顺序（移动后各列 orderIndex 连续、无重复）；
+  重排同列顺序（移动后各列 orderIndex 连续、无重复）；`orderIndex` 的语义是
+  **移除被拖任务后在目标列中的插入下标**（0 起始，越界收敛到列边界）：同列移动时
+  下标在“去掉被拖任务”的数组上解释，跨列移动的目标列本就不含该任务；与
+  `lib/domain computeMove` 的插入语义一致，看板拖拽（Issue #31）据此换算：
+  “拖到某张卡片上” = 该卡片在目标列的当前下标，“拖到列空白处 / 空列” = 列尾；
 - `GET /api/projects`：返回未归档项目数组，每项含 `id / name / color / counts`
   （counts 为该项目的 todo / doing / done 任务数与 total 合计）；空库返回 `[]`；
 - `POST /api/projects`：创建项目（name 必填、trim 后非空且 ≤60 字符；color 可选
