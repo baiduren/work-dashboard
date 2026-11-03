@@ -4,6 +4,10 @@
 
 generator client {
   provider = "prisma-client-js"
+  // 同时生成生产容器所需的查询引擎（Issue #35）：生产镜像运行在
+  // Debian 12 (bookworm / OpenSSL 3.0)，"native" 保留本地开发平台的引擎。
+  // 否则容器内会报 PrismaClientInitializationError：生成平台与运行平台不匹配。
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {

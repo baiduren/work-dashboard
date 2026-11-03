@@ -14,7 +14,10 @@ Next.js（App Router）+ TypeScript + Prisma + SQLite（[ADR-0001](0001-stack.md
 
 提供多阶段 `Dockerfile` 与 `docker-compose.yml`，一键构建并启动：
 
-- 基础镜像 `node:20-slim`（满足「Node ≥ 20」约定；Debian OpenSSL 3 与 Prisma 引擎兼容）；
+- 基础镜像固定为 `node:20-bookworm-slim`（Debian 12 / OpenSSL 3，满足「Node ≥ 20」约定，
+  OpenSSL 3 与 Prisma 引擎兼容；三个构建阶段使用同一镜像引用，显式固定 Debian 版本，
+  避免浮动 tag 在构建缓存与运行阶段之间发生 bullseye / bookworm 漂移——Issue #35），
+  Prisma Client 同时生成容器运行平台的引擎（`binaryTargets` 含 `debian-openssl-3.0.x`）；
 - 构建阶段执行 `npm ci` + `npm run build`；运行阶段仅安装生产依赖；
 - 容器启动时先执行 `prisma migrate deploy`（幂等），再前台运行 `next start -H 0.0.0.0`；
 - SQLite 数据库落在挂载卷（容器内 `/app/data/dashboard.db`），升级镜像不丢数据；
