@@ -74,7 +74,11 @@ docs/                   产品与设计文档（本目录）
 
 - `GET /api/tasks?view=today|overdue|undated|board|project[&projectId=…]` 返回列表
   （`board` 返回按状态分组的结构；`project` 必须带 `projectId`；`view` 缺失或非法 → 400）；
+  今日 / 逾期视图的日期边界按**服务器时区**计算，部署默认 `Asia/Shanghai`，容器可用 `TZ` 覆盖；
 - `POST /api/tasks`、`GET /api/tasks/:id`、`PATCH /api/tasks/:id`、`DELETE /api/tasks/:id`；
+- `PATCH /api/tasks/:id` 的字段更新与 `status` 变更在同一事务内完成：`status` 变更时
+  任务追加到目标列末尾、原列重排为 `0..n-1`（等价于 `/move` 移到列尾），
+  两列 `orderIndex` 连续无重复；列内位置微调走 `/move`；
 - `POST /api/tasks/:id/move`：body `{ status, orderIndex }`，按领域规则移动并在事务内
   重排同列顺序（移动后各列 orderIndex 连续、无重复）；
 - 失败返回 `{ error }`，成功返回资源本身；API 响应统一带 `Cache-Control: no-store`；
