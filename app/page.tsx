@@ -1,6 +1,7 @@
 // 今日视图首页（docs/00-product-brief.md「核心场景 1 今日」、Issue #21、Issue #25）：
 // 展示「今天到期 / 已逾期 / 待安排」三组未完成任务，并提供最小写操作闭环：
-// 顶部快速添加（默认今天到期）、点行编辑、行内「完成」与撤销。
+// 顶部快速添加（默认今天到期）、点行编辑、行内「完成」与撤销；
+// 另有数据导出 / 导入入口（Issue #37，docs/01-architecture.md「数据导出 / 导入」）。
 // 数据只经 lib/db 的 listTasks 查询（不直接调用 Prisma client、不发 HTTP）；
 // 写操作由交互组件（Client Component）调用现有 HTTP API 后 router.refresh() 回到这里刷新。
 // 每组为空显示友好空态，三组全空（如空库）时显示整页空态。
@@ -8,6 +9,7 @@
 
 import type { Metadata } from "next";
 
+import { BackupActions } from "@/components/backup-actions";
 import { QuickAddForm } from "@/components/quick-add-form";
 import type { TaskListItem } from "@/components/task-list";
 import { TodayBoard, type TodaySectionData } from "@/components/today-board";
@@ -75,6 +77,9 @@ export default async function TodayPage() {
       </div>
 
       <QuickAddForm />
+
+      {/* 数据备份入口（Issue #37）：导出全量 JSON / 导入恢复，见 docs/01-architecture.md「数据导出 / 导入」。 */}
+      <BackupActions />
 
       {total === 0 ? (
         <div className="mt-10 rounded-2xl border border-dashed border-neutral-300 bg-white px-6 py-16 text-center">
