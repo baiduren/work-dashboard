@@ -45,10 +45,13 @@ npm run dev          # 启动开发服务器，默认 http://localhost:3000
 | `AUTH_USERNAME` | 登录账号 |
 | `AUTH_PASSWORD` | 登录密码 |
 | `AUTH_SESSION_SECRET` | 会话签名密钥，**至少 32 个字符的随机串**（可用 `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"` 生成） |
+| `AUTH_COOKIE_SECURE` | 可选：`true`/`false` 强制指定 Cookie 的 `Secure` 属性；不设置时按请求协议自动判断（HTTPS/代理 → Secure，纯 HTTP → 不 Secure） |
 
 - 未配置或密钥过短时应用按“未认证”处理（fail closed），登录接口返回 500；
-- 会话 Cookie 为 HMAC-SHA256 签名，`HttpOnly`、`SameSite=Lax`，生产环境 `Secure`，有效期 7 天；
-  换 secret 或改密码即全体会话失效；
+- 会话 Cookie 为 HMAC-SHA256 签名，`HttpOnly`、`SameSite=Lax`，默认按请求协议决定 `Secure`，
+  有效期 7 天；换 secret 或改密码即全体会话失效；
+- **纯 HTTP 部署**（如内网 `http://IP:3000`）：Cookie 自动不带 `Secure`，可以正常登录；
+  但公网部署仍必须经 HTTPS 代理——明文 HTTP 下 Cookie 可被中间人截获；
 - 登录限流（单实例内存实现，记录数有上限）：
   - 同一来源 15 分钟内连续失败 5 次后返回 429，冷却后可再试；
   - 同时按 **来源 + 账号** 双键计数：只换 IP 或只换账号的轮换都无法绕过已达阈值的另一维度；
@@ -67,7 +70,9 @@ npm run dev          # 启动开发服务器，默认 http://localhost:3000
 - **覆盖（而非追加）`X-Forwarded-For`**：使用 `proxy_set_header X-Forwarded-For $remote_addr;`，
   不要用 `$proxy_add_x_forwarded_for`（追加模式会保留客户端伪造的链）；
   应用不读取 XFF 生成限流键；
-- 经多级代理时，由最外层（面向互联网的）代理设置上述两个头，内层代理不得透传客户端可控的同名头。
+- 经多级代理时，由最外层（面向互联网的）代理设置上述两个头，内层代理不得透传客户端可控的同名头；
+- **HTTPS 代理需设置 `X-Forwarded-Proto: https`**（nginx：`proxy_set_header X-Forwarded-Proto $scheme;`），
+  应用据此判断是否给会话 Cookie 加 `Secure`；未设置时按收到的请求协议判断。
 
 ## Docker 部署
 
@@ -102,11 +107,17 @@ docker compose down            # 停止；数据保留在命名卷中
 
 ### 使用 Docker Hub 镜像
 
-CI 在 `main` 的每次推送（且 checks 全过）后自动构建并推送镜像：
+镜像在以下时机构建并推送（每次都要求 checks 全过；PR 上只构建、不推送）：
 
-- `<DockerHub 用户名>/work-dashboard:latest`：随 `main` 更新；
-- `sha-<短哈希>`：每次构建的可追溯标签；
-- `v1.2.3` / `1.2`：推送 `v*` 形式的 tag 时额外生成。
+- **每日 21:00**（Asia/Shanghai，即 UTC 13:00）自动运行；
+- **手动触发**：Actions 页选择 `CI` → `Run workflow`；
+- **推送 `v*` tag**（如 `v1.0.0`）。
+
+镜像标签：
+
+- `<DockerHub 用户名>/work-dashboard:latest`：默认分支的定时 / 手动运行更新；
+- `sha-<短哈希>`：每次发布的可追溯标签；
+- `v1.2.3` / `1.2`：推送 `v*` tag 时生成。
 
 ```bash
 docker run -d --name work-dashboard -p 3000:3000 \
@@ -128,7 +139,7 @@ docker run -d --name work-dashboard -p 3000:3000 \
    - `DOCKERHUB_USERNAME`：Docker Hub 用户名；
    - `DOCKERHUB_TOKEN`：上一步生成的 Access Token（不要用账号密码）；
    - 可选：在 **Variables** 里加 `DOCKERHUB_REPOSITORY` 覆盖镜像仓库名（默认 `work-dashboard`）；
-4. 配置完成后，推送到 `main` 会在 checks 通过后自动发布；打 `v1.0.0` 这类 tag 会额外发布版本标签；
+4. 配置完成后，三种触发（每日 21:00 / 手动 / `v*` tag）都会在 checks 通过后发布；
 5. 未配置 secrets 时，`docker` job 会明确报错提示缺哪个 secret（不会推送任何镜像）。
 
 > 镜像默认只构建 `linux/amd64`；需要 arm64（Apple Silicon 服务器/树莓派）时，在
