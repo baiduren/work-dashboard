@@ -69,6 +69,10 @@ docs/                   产品与设计文档（本目录）
 ## 模块边界
 
 - **页面 / 组件**：只负责展示与交互，不直接读写数据库；
+  编辑弹层（`components/edit-task-modal.tsx`）在弹层内直接 fetch 现有 HTTP API：
+  保存 PATCH、删除 DELETE `/api/tasks/:id`（Issue #41 起，删除入口带内联二次确认——
+  确认态可撤销 / 超时复位，不用 `window.confirm`；204 关闭弹层、404 视为已删除、
+  失败保留弹层；删除与保存互斥），成功后回调父级 `router.refresh()`；
 - **lib/domain**：任务状态与排序等纯逻辑，可单测（`lib/domain/task.ts`：取值校验、
   completedAt 语义、看板移动计算、今日归类；日期边界可注入当前时间）；
   项目取值校验在 `lib/domain/project.ts`（name 非空且 ≤60 字符、color 为 `#RRGGBB`
