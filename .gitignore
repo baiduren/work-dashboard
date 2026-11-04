@@ -30,6 +30,11 @@ out/
 *.tsbuildinfo
 next-env.d.ts
 
-# Prisma SQLite 本地数据库（不入库）
+# Prisma SQLite 本地数据库（不入库；E2E 用 prisma/e2e-test.db，同样被 *.db 覆盖）
 *.db
 *.db-journal
+
+# Playwright E2E 产物（Issue #45）
+test-results/
+playwright-report/
+blob-report/

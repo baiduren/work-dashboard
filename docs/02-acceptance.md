@@ -124,6 +124,23 @@
       After：主列表归档入口 + 已归档折叠区展开、详情页操作按钮与删除确认态两帧，
       PR 描述用绝对地址引用）。
 
+## 端到端验收（Playwright 核心旅程，Issue #45）
+
+成功标准依据：[docs/00-product-brief.md](00-product-brief.md)「成功标准」——关键路径有
+自动化测试（数据层 + 至少一条端到端）。
+
+- [ ] 前置：`npm run build`（webServer 运行生产构建 `next start`，不是 next dev）；
+- [ ] 首次安装浏览器：`npm run e2e:install`（等价 `npx playwright install chromium`）；
+- [ ] `npm run e2e` 全绿；`tests/e2e/core-journey.spec.ts` 一条用例串起：
+      未登录访问 `/` → 302 到 `/login?next=/` → 错误密码显示「账号或密码错误」→
+      正确凭据登录进入今日视图 → 快速添加「E2E 冒烟任务」出现在列表 →
+      点「完成」后该行消失 → `/board` 该任务出现在「已完成」列 → 刷新后状态保持；
+- [ ] 测试使用独立 SQLite 文件 `prisma/e2e-test.db` 与独立测试凭据；
+      globalSetup 每次运行前迁移并清空业务表，开发库 `prisma/dev.db` 数据不受影响；
+- [ ] 失败时自动保留 trace 与截图（`test-results/`），可本地复现失败现场；
+- [ ] `npm run lint` / `typecheck` / `test` / `build` 全绿（现有 CI 四项不受影响）；
+- [ ] 本工单不改变页面行为，无需 UI Before / After 截图。
+
 ## 周回顾验收（按周查看完成任务，Issue #44）
 
 - [ ] 未登录访问 `/review` 返回 302 到 `/login?next=…`（middleware 现有行为不变，本工单不改 middleware）；

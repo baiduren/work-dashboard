@@ -26,6 +26,9 @@ lib/
   db/                   数据库访问层（Prisma client 封装）
 prisma/
   schema.prisma         数据模型与迁移
+tests/                  单元测试（Vitest）
+  e2e/                  Playwright 端到端（核心旅程一条）
+playwright.config.ts    E2E 配置（独立端口与测试库）
 middleware.ts           全局访问控制（未登录一律拦截）
 docs/                   产品与设计文档（本目录）
 ```
@@ -187,6 +190,28 @@ docs/                   产品与设计文档（本目录）
 - 非目标：增量合并、冲突解决、按 id 去重合并、自动定时备份、云备份、
   备份文件管理、跨版本迁移；独立标签管理页属后续工单（Issue #39 已提供
   编辑弹层内的新建标签入口）。
+
+## 测试
+
+双层结构（技术栈见 [ADR-0001](adr/0001-stack.md)）：
+
+- **Vitest（单元 / 集成）**：`tests/**/*.test.ts` 与 `lib/**/*.test.ts`，Node 环境直接
+  跑模块（不启动 Next、无浏览器）；覆盖数据层、领域纯逻辑、API route handler、
+  认证与 middleware。命令 `npm run test`；
+- **Playwright（端到端）**：`tests/e2e/*.spec.ts`，一条核心旅程冒烟
+  （未登录重定向 → 错误密码 → 登录成功 → 快速添加 → 完成 → 看板 done 列 → 刷新后保持）：
+  - `playwright.config.ts` 的 webServer 用**生产构建**（`next start`）在独立端口
+    **3100** 启动，与本地 `npm run dev`（3000）隔离；运行前需先 `npm run build`；
+  - 凭据、会话密钥与数据库由 `tests/e2e/env.ts` 注入：独立测试账号 +
+    独立 SQLite 文件 `prisma/e2e-test.db`；`tests/e2e/global-setup.ts` 每次运行前
+    `prisma migrate deploy` 并清空业务表，绝不触碰开发库 `prisma/dev.db`；
+  - 失败保留截图与 trace（`test-results/`），HTML 报告在 `playwright-report/`，
+    两者均被 .gitignore 忽略；
+  - 仅测试用途：Playwright 只在 devDependencies；Next.js 15 把它声明为 optional peer，
+    npm `--omit=dev` 仍会带入 devOptional 包，所以 Dockerfile 的 prod-deps 阶段显式移除，
+    运行镜像不含 Playwright 与浏览器二进制；
+  - 命令：`npm run e2e`（首次先 `npm run e2e:install` 安装 chromium）；
+  - 非目标：CI 接入、多浏览器矩阵、移动端视口、视觉回归（后续工单或按需补）。
 
 ## 非功能约定
 

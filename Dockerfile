@@ -22,7 +22,11 @@ FROM node:20-bookworm-slim AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY prisma/schema.prisma ./prisma/
-RUN npm ci --omit=dev
+# Playwright 仅用于测试。Next.js 15 把 @playwright/test 声明为 optional peer，
+# npm 在 --omit=dev 下仍会安装这类 devOptional 包，因此显式移除，运行镜像不含它
+#（浏览器二进制只在本地 `npm run e2e:install` 时下载，从不进入镜像）。
+RUN npm ci --omit=dev \
+    && rm -rf node_modules/@playwright node_modules/playwright node_modules/playwright-core
 
 # ---- 阶段 3：运行镜像（非 root，数据落在挂载卷 /app/data）----
 FROM node:20-bookworm-slim AS runner

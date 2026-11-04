@@ -11,6 +11,10 @@ node_modules
 .next
 out
 coverage
+# Playwright E2E 产物（仅本地，不进构建上下文）
+test-results
+playwright-report
+blob-report
 
 # 本地数据库与环境（运行期由容器环境变量与挂载卷提供）
 *.db
@@ -19,9 +23,9 @@ coverage
 .env.*
 !.env.example
 
-# 仅本地使用的文件
+# 构建阶段的 next build 会对全项目做类型检查（playwright.config.ts 引用 tests/e2e/env），
+# 因此 tests/ 需进入构建上下文；运行镜像（阶段 3）只 COPY 显式列出的目录，不会携带测试代码。
 docs
-tests
 *.log
 *.tmp
 *.bak
