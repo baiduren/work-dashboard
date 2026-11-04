@@ -10,10 +10,11 @@ import { POST as moveRoute } from "../app/api/tasks/[id]/move/route";
 import { GET as listRoute, POST as createRoute } from "../app/api/tasks/route";
 import { prisma } from "../lib/db";
 import { ProjectNotFoundError } from "../lib/db/projects";
+import { createTag, setTaskTags } from "../lib/db/tags";
 import { createTask, getTask, TaskNotFoundError } from "../lib/db/tasks";
 import { TaskValidationError } from "../lib/domain/task";
 
-// 任务 CRUD HTTP API 集成测试（Issue #19）。
+// 任务 CRUD HTTP API 集成测试（Issue #19；Issue #51 增加 q / priority / tagId 筛选）。
 // 调用真实 route handler 函数 + 临时 SQLite（与 A 条 task-db.test.ts 相同的准备方式），
 // 不依赖也不触碰 prisma/dev.db；DATABASE_URL 必须在 lib/db 模块求值之前指向临时库，
 // 因此用 vi.hoisted 在静态 import 之前完成设置。每个用例前后清理数据。
@@ -48,10 +49,12 @@ afterAll(async () => {
 beforeEach(async () => {
   await prisma.task.deleteMany();
   await prisma.project.deleteMany();
+  await prisma.tag.deleteMany();
 });
 afterEach(async () => {
   await prisma.task.deleteMany();
   await prisma.project.deleteMany();
+  await prisma.tag.deleteMany();
 });
 
 // ---------------------------------------------------------------------------
@@ -103,6 +106,13 @@ async function board(): Promise<BoardJson> {
   const res = await listRoute(listReq("?view=board"));
   expect(res.status).toBe(200);
   return (await res.json()) as BoardJson;
+}
+
+/** 列表视图的标题集合（断言顺序无关的用例先 sort）。 */
+async function titlesFor(search: string): Promise<string[]> {
+  const res = await listRoute(listReq(search));
+  expect(res.status).toBe(200);
+  return ((await res.json()) as TaskJson[]).map((task) => task.title);
 }
 
 async function seedProject(name: string): Promise<{ id: string }> {
@@ -182,6 +192,142 @@ describe("GET /api/tasks", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain(message);
+  });
+
+  // -------------------------------------------------------------------------
+  // 可选筛选参数 q / priority / tagId（Issue #51）
+  // -------------------------------------------------------------------------
+
+  it("q 匹配 title / notes（中文按原样子串包含，不分词）", async () => {
+    await createTask({ title: "写周报", notes: "总结本周进展", dueDate: dayAt(0) });
+    await createTask({ title: "整理会议纪要", notes: "引用周报模板", dueDate: dayAt(0) });
+    await createTask({ title: "买菜", dueDate: dayAt(0) });
+
+    const q = (word: string) => `?view=today&q=${encodeURIComponent(word)}`;
+    // title 命中 + notes 命中都返回（顺序无关断言）。
+    expect((await titlesFor(q("周报"))).sort()).toEqual(["写周报", "整理会议纪要"].sort());
+    expect(await titlesFor(q("进展"))).toEqual(["写周报"]); // 只命中 notes
+    expect(await titlesFor(q("会议"))).toEqual(["整理会议纪要"]);
+    expect(await titlesFor(q("不存在的词"))).toEqual([]);
+  });
+
+  it("q 大小写不敏感（ASCII）", async () => {
+    await createTask({ title: "Weekly Report", dueDate: dayAt(0) });
+    await createTask({ title: "weekly review", dueDate: dayAt(0) });
+    expect((await titlesFor("?view=today&q=WEEKLY")).sort()).toEqual(
+      ["Weekly Report", "weekly review"].sort(),
+    );
+  });
+
+  it("priority 过滤：单独与 view 叠加生效", async () => {
+    await createTask({ title: "高", priority: "high", dueDate: dayAt(0) });
+    await createTask({ title: "中", priority: "medium", dueDate: dayAt(0) });
+    await createTask({ title: "低", priority: "low", dueDate: dayAt(0) });
+    await createTask({ title: "无日期-低", priority: "low" });
+
+    expect(await titlesFor("?view=today&priority=high")).toEqual(["高"]);
+    expect(await titlesFor("?view=undated&priority=low")).toEqual(["无日期-低"]);
+    expect(await titlesFor("?view=today&priority=low")).toEqual(["低"]);
+  });
+
+  it("tagId 精确过滤：单独与 priority / view 组合生效", async () => {
+    const work = await createTag({ name: "工作" });
+    const life = await createTag({ name: "生活" });
+    const highWork = await createTask({ title: "高-工作", priority: "high", dueDate: dayAt(0) });
+    const lowWork = await createTask({ title: "低-工作", priority: "low", dueDate: dayAt(0) });
+    const lifeUndated = await createTask({ title: "生活-待安排" });
+    await setTaskTags(highWork.id, [work.id]);
+    await setTaskTags(lowWork.id, [work.id]);
+    await setTaskTags(lifeUndated.id, [life.id]);
+
+    expect((await titlesFor(`?view=today&tagId=${work.id}`)).sort()).toEqual(
+      ["高-工作", "低-工作"].sort(),
+    );
+    expect(await titlesFor(`?view=today&tagId=${work.id}&priority=high`)).toEqual(["高-工作"]);
+    expect(await titlesFor(`?view=undated&tagId=${life.id}`)).toEqual(["生活-待安排"]);
+    expect(await titlesFor(`?view=today&tagId=${life.id}`)).toEqual([]);
+  });
+
+  it("board 视图叠加筛选：三列结构保持，列内 orderIndex 顺序不变", async () => {
+    const work = await createTag({ name: "工作" });
+    const highTodoA = await createTask({ title: "待办-高-A", priority: "high" });
+    await createTask({ title: "待办-中", priority: "medium" });
+    await createTask({ title: "待办-高-B", priority: "high" });
+    const highDoing = await createTask({ title: "进行-高", priority: "high", status: "doing" });
+    await createTask({ title: "进行-低", priority: "low", status: "doing" });
+    await createTask({ title: "完成-中", priority: "medium", status: "done" });
+    await setTaskTags(highTodoA.id, [work.id]);
+    await setTaskTags(highDoing.id, [work.id]);
+
+    const res = await listRoute(listReq("?view=board&priority=high"));
+    expect(res.status).toBe(200);
+    const view = (await res.json()) as BoardJson;
+    expect(Object.keys(view).sort()).toEqual(["doing", "done", "todo"]);
+    expect(view.todo.map((task) => task.title)).toEqual(["待办-高-A", "待办-高-B"]);
+    // 列内 orderIndex 保持原值（筛掉中间任务不重排），顺序仍按 orderIndex。
+    expect(view.todo.map((task) => task.orderIndex)).toEqual([0, 2]);
+    expect(view.doing.map((task) => task.title)).toEqual(["进行-高"]);
+    expect(view.done).toEqual([]);
+
+    // 组合：priority + tagId，各列同时过滤。
+    const combo = await listRoute(listReq(`?view=board&priority=high&tagId=${work.id}`));
+    expect(combo.status).toBe(200);
+    const filtered = (await combo.json()) as BoardJson;
+    expect(filtered.todo.map((task) => task.title)).toEqual(["待办-高-A"]);
+    expect(filtered.doing.map((task) => task.title)).toEqual(["进行-高"]);
+    expect(filtered.done).toEqual([]);
+  });
+
+  it("view=project 也支持 priority / tagId 筛选", async () => {
+    const project = await seedProject("项目一");
+    const work = await createTag({ name: "工作" });
+    const highProject = await createTask({
+      title: "项目-高",
+      projectId: project.id,
+      priority: "high",
+    });
+    await createTask({ title: "项目-低", projectId: project.id, priority: "low" });
+    await createTask({ title: "非项目-高", priority: "high" });
+    await setTaskTags(highProject.id, [work.id]);
+
+    expect(
+      await titlesFor(`?view=project&projectId=${project.id}&priority=high`),
+    ).toEqual(["项目-高"]);
+    expect(await titlesFor(`?view=project&projectId=${project.id}&tagId=${work.id}`)).toEqual([
+      "项目-高",
+    ]);
+  });
+
+  it("非法 priority（含空值 / 小写外的写法）→ 400", async () => {
+    for (const value of ["urgent", "", "HIGH"]) {
+      const res = await listRoute(listReq(`?view=today&priority=${encodeURIComponent(value)}`));
+      expect(res.status).toBe(400);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(typeof ((await res.json()) as { error: string }).error).toBe("string");
+    }
+  });
+
+  it("tagId 不存在 → 400 固定文案「标签不存在」", async () => {
+    for (const view of ["today", "board"]) {
+      const res = await listRoute(listReq(`?view=${view}&tagId=no-such-tag`));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "标签不存在" });
+    }
+  });
+
+  it("参数全缺省时行为与改动前一致；q 空串 / 纯空白视为未提供", async () => {
+    await createTask({ title: "今天到期", dueDate: dayAt(0) });
+    await createTask({ title: "无日期" });
+    await createTask({ title: "已完成", status: "done" });
+
+    const baseline = await listRoute(listReq("?view=today"));
+    const blankQuery = await listRoute(listReq("?view=today&q=%20%20%20"));
+    expect(blankQuery.status).toBe(200);
+    expect(await blankQuery.json()).toEqual(await baseline.json());
+
+    const boardBaseline = await listRoute(listReq("?view=board"));
+    const boardBlank = await listRoute(listReq("?view=board&q=%20"));
+    expect(await boardBlank.json()).toEqual(await boardBaseline.json());
   });
 });
 

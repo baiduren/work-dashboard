@@ -94,7 +94,8 @@ docs/                   产品与设计文档（本目录）
   或 null、patch 只允许 name/color）；
 - **lib/db**：唯一的数据访问入口（Prisma）；任务数据的读写函数在 `lib/db/tasks.ts`
   （含周回顾查询 `listCompletedBetween`：`completedAt ∈ [from, to)` 含头不含尾、
-  按完成时间降序、不筛项目与状态，Issue #44），
+  按完成时间降序、不筛项目与状态，Issue #44；Issue #51 起 `listTasks` 各视图支持
+  `q / priority / tagId` 筛选，where 条件在数据层组装、各视图按 AND 叠加），
   项目数据的读写函数在 `lib/db/projects.ts`（未归档 / 已归档项目列表 + 各状态任务计数；
   Issue #43 起 `deleteProject` 在事务内删除项目，其下任务 `projectId` 由 SetNull 置空），
   标签的读写与任务绑定在 `lib/db/tags.ts`（Issue #39：`setTaskTags` 事务内全量替换绑定，
@@ -111,8 +112,23 @@ docs/                   产品与设计文档（本目录）
   缺省本周，非法值（格式不对 / 不存在的日期）回退本周；周切换用链接驱动查询参数
   （Server Component 渲染，不引入客户端状态）；完成记录按
   `completedAt ∈ [周一 00:00, 下周一 00:00)`（本地时区，含头不含尾）查询并按天分组展示；
-- `GET /api/tasks?view=today|overdue|undated|board|project[&projectId=…]` 返回列表
+- 今日 / 看板页提供服务端筛选栏（Issue #51，`components/task-filters.tsx`）：
+  `q / priority / tagId` 写入 URL searchParams（`router.replace`，保持可分享与可后退），
+  Server Component 按参数重新查询（force-dynamic 已就绪）；关键词输入防抖 300ms 或回车触发，
+  优先级 / 标签下拉即时生效，「清除筛选」一键复位。客户端只维护输入态、不本地过滤列表；
+  今日视图 Issue #39 的前端标签筛选作为轻量快捷方式保留。筛选中空结果显示「无匹配任务」，
+  与空库真空态区分；项目详情页不做筛选栏（项目内任务少，编辑弹层可查）；
+- `GET /api/tasks?view=today|overdue|undated|board|project[&projectId=…]`
+  `[&q=…][&priority=low|medium|high][&tagId=…]` 返回列表
   （`board` 返回按状态分组的结构；`project` 必须带 `projectId`；`view` 缺失或非法 → 400）；
+  可选筛选参数（Issue #51，可与任意 `view` 叠加、与现有视图条件按 AND 组合）：
+  - `q`：匹配 `title` / `notes` 的包含关系（大小写不敏感仅限 ASCII——SQLite `like` 行为；
+    中文按原样子串包含，不做分词）；空串 / 纯空白视为未提供；
+  - `priority`：`low | medium | high`，非法值 → 400；
+  - `tagId`：精确绑定该标签的任务（I 工单 #39 预留语义）；tagId 不存在 → 400，
+    固定文案「标签不存在」；
+  - `board` 视图的三列结构不变，筛选在各列内生效，列内 `orderIndex` 顺序保持；
+    参数全缺省时行为与未引入筛选前一致，响应结构不变（任务对象已带 `tags`）；
   今日 / 逾期视图的日期边界按**服务器时区**计算，部署默认 `Asia/Shanghai`，容器可用 `TZ` 覆盖；
 - `POST /api/tasks`、`GET /api/tasks/:id`、`PATCH /api/tasks/:id`、`DELETE /api/tasks/:id`；
   各接口返回的任务对象（含 `GET /api/tasks?view=…` 各视图与 `POST /api/tasks` 的 201 响应）
