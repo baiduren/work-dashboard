@@ -57,6 +57,9 @@ docs/                   产品与设计文档（本目录）
 ## 数据模型（草案）
 
 - `Project`：id、name、color、archived
+  （archived **已启用**（Issue #43）：PATCH 可更新——`true` 归档 / `false` 恢复；
+  项目可经 DELETE 删除，其下任务的 projectId 由外键 `onDelete: SetNull` 置空、任务本身保留；
+  项目列表页底部提供「已归档」折叠区展示归档项目并支持恢复）；
 - `Task`：id、title、notes、status（todo/doing/done）、priority（low/medium/high）、
   dueDate、projectId、orderIndex、createdAt、updatedAt、completedAt
 - `Tag`：id、name、color；`TaskTag`：taskId、tagId。
@@ -84,7 +87,8 @@ docs/                   产品与设计文档（本目录）
 - **lib/db**：唯一的数据访问入口（Prisma）；任务数据的读写函数在 `lib/db/tasks.ts`
   （含周回顾查询 `listCompletedBetween`：`completedAt ∈ [from, to)` 含头不含尾、
   按完成时间降序、不筛项目与状态，Issue #44），
-  项目数据的读写函数在 `lib/db/projects.ts`（未归档项目 + 各状态任务计数），
+  项目数据的读写函数在 `lib/db/projects.ts`（未归档 / 已归档项目列表 + 各状态任务计数；
+  Issue #43 起 `deleteProject` 在事务内删除项目，其下任务 `projectId` 由 SetNull 置空），
   标签的读写与任务绑定在 `lib/db/tags.ts`（Issue #39：`setTaskTags` 事务内全量替换绑定，
   内部函数 `applyTaskTagsInTx` 供任务更新复用同一事务，禁止嵌套独立事务），
   全量备份的导出 / 导入在 `lib/db/backup.ts`，
@@ -125,13 +129,20 @@ docs/                   产品与设计文档（本目录）
 - `DELETE /api/tags/:id`：成功 204；标签不存在 → 404；挂在该标签上的任务绑定
   由数据库外键级联删除（任务本身保留）；
 - `GET /api/projects`：返回未归档项目数组，每项含 `id / name / color / counts`
-  （counts 为该项目的 todo / doing / done 任务数与 total 合计）；空库返回 `[]`；
+  （counts 为该项目的 todo / doing / done 任务数与 total 合计）；空库返回 `[]`。
+  已归档项目不出现在该列表（Issue #43 起「所属项目」下拉数据也来自此接口，
+  归档项目因此自然不再出现在新建 / 编辑任务的选择中）；归档项目由项目列表页
+  底部「已归档」折叠区展示（服务端经 `listArchivedProjects` 查询）；
 - `POST /api/projects`：创建项目（name 必填、trim 后非空且 ≤60 字符；color 可选
   `#RRGGBB` 或 null），成功 201 返回项目；
 - `GET /api/projects/:id`：存在返回项目，不存在 → 404；
-- `PATCH /api/projects/:id`：仅允许更新 `name / color`（未知字段 → 400；显式
-  `color=null` 清空颜色），项目不存在 → 404；项目名重复不拒绝（schema 未加唯一约束，
-  与任务标题同一策略）；项目归档 / 删除不在当前范围（后续工单）；
+- `PATCH /api/projects/:id`：仅允许更新 `name / color / archived`（未知字段 → 400；
+  显式 `color=null` 清空颜色；`archived` 必须是布尔值——`true` 归档、`false` 恢复，
+  非法值 → 400），项目不存在 → 404；项目名重复不拒绝（schema 未加唯一约束，
+  与任务标题同一策略）；
+- `DELETE /api/projects/:id`：成功 204，项目不存在 → 404（Issue #43）。只删除项目本身：
+  挂在其下的任务 `projectId` 由数据库外键 `onDelete: SetNull` 置空，任务本身保留
+  （不级联删除、不可撤销）；归档项目也可直接删除；
 - 失败返回 `{ error }`，成功返回资源本身；API 响应统一带 `Cache-Control: no-store`；
 - 所有写操作在服务端校验字段与状态取值（`status` 仅 `todo|doing|done`，`priority` 仅
   `low|medium|high`），非法值抛出可识别错误（`lib/domain` 的 `TaskValidationError`），调用方据此返回 400；

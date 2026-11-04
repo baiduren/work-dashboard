@@ -3,6 +3,8 @@
 // （调用方映射为 400）；项目不存在抛 ProjectNotFoundError（调用方映射为 404）。
 // 项目名重复不拒绝（docs/01-architecture.md「数据模型」：schema 未加唯一约束，
 // 与任务「标题可重复」同一策略，见 tests/project-db.test.ts 的说明用例）。
+// Issue #43 起：PATCH 支持 archived（true 归档 / false 恢复）；deleteProject 删除项目，
+// 其下任务的 projectId 由 schema 的 onDelete: SetNull 置空（任务本身保留，不级联删除）。
 
 import { Prisma, type Project } from "@prisma/client";
 
@@ -72,8 +74,9 @@ export async function getProject(id: string): Promise<ProjectRecord | null> {
 }
 
 /**
- * 更新项目的 name / color（字段校验见 lib/domain normalizeProjectPatch；补丁为空则原样返回）。
- * 显式 color=null 清空颜色；项目不存在时抛出 ProjectNotFoundError。
+ * 更新项目的 name / color / archived（字段校验见 lib/domain normalizeProjectPatch；
+ * 补丁为空则原样返回）。显式 color=null 清空颜色；archived=true 归档、false 恢复；
+ * 项目不存在时抛出 ProjectNotFoundError。
  */
 export async function updateProject(id: string, patch: ProjectPatch): Promise<ProjectRecord> {
   const normalized = normalizeProjectPatch(patch);
@@ -90,13 +93,32 @@ export async function updateProject(id: string, patch: ProjectPatch): Promise<Pr
 }
 
 /**
- * 未归档项目列表 + 每个项目的任务计数（todo / doing / done / total）：
- - 只返回 archived=false 的项目（归档视图留待后续工单），按名称升序；
- - counts 统计该项目全部状态的任务（含已完成）；无任务的项目计数全 0。
+ * 删除项目（Issue #43）：项目不存在抛出 ProjectNotFoundError。
+ * 只删除项目本身；其下任务的 projectId 由 schema 外键 `onDelete: SetNull` 置空，
+ * 任务本身保留（不级联删除）。单行删除也放事务内执行：与现有写操作约定一致，
+ * 为后续扩展留一致性边界（docs/01-architecture.md「模块边界」）。
  */
-export async function listProjects(): Promise<ProjectWithCounts[]> {
+export async function deleteProject(id: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    try {
+      await tx.project.delete({ where: { id } });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new ProjectNotFoundError(id);
+      }
+      throw error;
+    }
+  });
+}
+
+/**
+ * 项目列表（archived=false）+ 每个项目的任务计数（todo / doing / done / total）：
+ * - 只返回指定归档状态的项目，按名称升序；
+ * - counts 统计该项目全部状态的任务（含已完成）；无任务的项目计数全 0。
+ */
+async function listProjectsWithCounts(archived: boolean): Promise<ProjectWithCounts[]> {
   const [projects, grouped] = await Promise.all([
-    prisma.project.findMany({ where: { archived: false }, orderBy: [{ name: "asc" }] }),
+    prisma.project.findMany({ where: { archived }, orderBy: [{ name: "asc" }] }),
     prisma.task.groupBy({ by: ["projectId", "status"], _count: { _all: true } }),
   ]);
 
@@ -106,7 +128,7 @@ export async function listProjects(): Promise<ProjectWithCounts[]> {
   }
   for (const group of grouped) {
     const counts = group.projectId === null ? undefined : countsByProject.get(group.projectId);
-    if (!counts) continue; // 无项目的任务或已归档项目的任务不计入列表
+    if (!counts) continue; // 无项目的任务或不在此归档状态下的项目的任务不计入列表
     const count = group._count._all;
     counts.total += count;
     if (group.status === "todo") counts.todo = count;
@@ -124,4 +146,17 @@ export async function listProjects(): Promise<ProjectWithCounts[]> {
       counts: counts ?? { todo: 0, doing: 0, done: 0, total: 0 },
     };
   });
+}
+
+/** 未归档项目列表（主列表）；语义与 Issue #27 一致，不变更。 */
+export async function listProjects(): Promise<ProjectWithCounts[]> {
+  return listProjectsWithCounts(false);
+}
+
+/**
+ * 已归档项目列表（Issue #43，供项目列表页底部「已归档」折叠区展示）：
+ * 只返回 archived=true 的项目，按名称升序，结构与 ProjectWithCounts 相同。
+ */
+export async function listArchivedProjects(): Promise<ProjectWithCounts[]> {
+  return listProjectsWithCounts(true);
 }

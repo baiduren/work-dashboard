@@ -1,5 +1,7 @@
-// 项目详情页（Issue #27、Issue #39）：项目名/颜色 + 该项目全部状态的任务列表（只读，
-// 任务行带标签徽标）。数据只经 lib/db 查询：getProject + listTasks("project", { projectId })
+// 项目详情页（Issue #27、Issue #39、Issue #43）：项目名/颜色 + 该项目全部状态的任务列表
+// （只读，任务行带标签徽标）。头部右侧提供「归档 / 删除」操作（归档项目显示「恢复 / 删除」，
+// 见 components/project-detail-actions：Client Component，两段式删除确认）。
+// 数据只经 lib/db 查询：getProject + listTasks("project", { projectId })
 // （project 视图含全部状态：todo → doing → done，组内按 orderIndex，见 lib/db/tasks）。
 // 列表复用 TaskList 的只读形态：不传 onEdit / onComplete，行不可编辑、无「完成」按钮，
 // 并以状态徽标区分进行中 / 已完成任务。项目不存在 → notFound()（404）。
@@ -10,6 +12,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ColorDot } from "@/components/color-dot";
+import { ProjectDetailActions } from "@/components/project-detail-actions";
 import type { TaskListItem } from "@/components/task-list";
 import { TaskList } from "@/components/task-list";
 import { getProject, type ProjectRecord } from "@/lib/db/projects";
@@ -63,6 +66,7 @@ export default async function ProjectDetailPage({
         <span className="shrink-0 text-sm tabular-nums text-neutral-500">
           {tasks.length} 个任务
         </span>
+        <ProjectDetailActions projectId={project.id} archived={project.archived} />
       </div>
 
       <div className="mt-6">

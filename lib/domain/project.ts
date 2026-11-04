@@ -1,7 +1,8 @@
 // 项目领域逻辑（docs/01-architecture.md「模块边界」「数据模型」）：纯函数、可单测、不依赖数据库与框架。
 // 职责：
 // 1. 项目名 / 颜色取值校验（颜色为 #RRGGBB 十六进制，null 表示清空）；
-// 2. 项目更新补丁的归一化（只允许 name / color，归档与删除不在本工单范围）。
+// 2. 项目更新补丁的归一化（只允许 name / color / archived，Issue #43 起
+//    archived 参与 PATCH：true 归档、false 恢复；项目删除走 DELETE API，不经补丁）。
 // 与任务一致，非法输入统一抛出 TaskValidationError，调用方据此映射为 400
 // （docs/01-architecture.md「接口约定」；沿用现有错误类型即可被 400 映射）。
 
@@ -54,27 +55,43 @@ export function parseProjectColor(value: unknown): string | null {
   return parseHexColor(value, "color");
 }
 
-/** updateProject 的输入：仅允许 name / color。 */
+/** 校验 archived 取值：必须是布尔值（true 归档 / false 恢复），其余类型拒绝。 */
+export function parseProjectArchived(value: unknown): boolean {
+  if (typeof value !== "boolean") {
+    throw new TaskValidationError(
+      `archived 必须是布尔值，收到：${stringify(value)}`,
+      "archived",
+    );
+  }
+  return value;
+}
+
+/** updateProject 的输入：仅允许 name / color / archived。 */
 export interface ProjectPatch {
   name?: string;
   color?: string | null;
+  archived?: boolean;
 }
 
 export interface NormalizedProjectPatch {
   name?: string;
   color?: string | null;
+  archived?: boolean;
 }
 
 /**
- * 归一化项目更新补丁：只挑选可更新字段（name / color，其余字段——包括 archived——
- * 一律忽略；归档/删除不在本工单范围）。未提供的字段不出现在结果里，
- * 显式 null 的 color 表示清空颜色。输入不是对象时抛出 TaskValidationError。
+ * 归一化项目更新补丁：只挑选可更新字段（name / color / archived，其余字段一律忽略）。
+ * 未提供的字段不出现在结果里，显式 null 的 color 表示清空颜色，
+ * archived 必须是布尔值（true 归档 / false 恢复）。输入不是对象时抛出 TaskValidationError。
  */
 export function normalizeProjectPatch(patch: unknown): NormalizedProjectPatch {
   const source = expectPlainObject(patch);
   const result: NormalizedProjectPatch = {};
   if (source.name !== undefined) result.name = parseProjectName(source.name);
   if (source.color !== undefined) result.color = parseProjectColor(source.color);
+  if (source.archived !== undefined) {
+    result.archived = parseProjectArchived(source.archived);
+  }
   return result;
 }
 

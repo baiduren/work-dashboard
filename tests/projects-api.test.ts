@@ -4,14 +4,18 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-import { GET as projectRoute, PATCH as patchRoute } from "../app/api/projects/[id]/route";
+import {
+  DELETE as deleteRoute,
+  GET as projectRoute,
+  PATCH as patchRoute,
+} from "../app/api/projects/[id]/route";
 import { GET as listRoute, POST as createRoute } from "../app/api/projects/route";
 import { prisma } from "../lib/db";
 import { createProject, ProjectNotFoundError } from "../lib/db/projects";
 import { createTask, type CreateTaskInput } from "../lib/db/tasks";
 import { TaskValidationError } from "../lib/domain/task";
 
-// 项目 HTTP API 集成测试（Issue #27「范围 3/5」）。
+// 项目 HTTP API 集成测试（Issue #27「范围 3/5」；Issue #43：PATCH archived 与 DELETE）。
 // 调用真实 route handler 函数 + 临时 SQLite（与 task-db / tasks-api 测试相同的准备方式），
 // 不依赖也不触碰 prisma/dev.db；DATABASE_URL 必须在 lib/db 模块求值之前指向临时库，
 // 因此用 vi.hoisted 在静态 import 之前完成设置。每个用例前后清理数据。
@@ -256,9 +260,9 @@ describe("PATCH /api/projects/:id", () => {
     expect(after?.color).toBe("#ef4444");
   });
 
-  it("未知字段 → 400 且不落库（archived 不在可更新范围）", async () => {
+  it("未知字段 → 400 且不落库（archived 已是可更新字段，其余仍拒绝）", async () => {
     const project = await createProject({ name: "项目一" });
-    for (const patch of [{ archived: true }, { id: "other" }, { foo: "bar" }]) {
+    for (const patch of [{ id: "other" }, { foo: "bar" }, { orderIndex: 1 }]) {
       const res = await patchRoute(
         jsonReq(`/api/projects/${project.id}`, "PATCH", patch),
         ctx(project.id),
@@ -269,6 +273,7 @@ describe("PATCH /api/projects/:id", () => {
     }
     const after = await prisma.project.findUnique({ where: { id: project.id } });
     expect(after?.archived).toBe(false);
+    expect(after?.name).toBe("项目一");
   });
 
   it("项目不存在 → 404；请求体不是 JSON / 不是对象 → 400", async () => {
@@ -282,6 +287,114 @@ describe("PATCH /api/projects/:id", () => {
     const project = await createProject({ name: "项目一" });
     expect((await patchRoute(rawReq(`/api/projects/${project.id}`, "PATCH", "{oops"), ctx(project.id))).status).toBe(400);
     expect((await patchRoute(jsonReq(`/api/projects/${project.id}`, "PATCH", ["x"]), ctx(project.id))).status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /api/projects/:id — archived（Issue #43）
+// ---------------------------------------------------------------------------
+
+describe("PATCH /api/projects/:id archived", () => {
+  it("archived=true 归档：200 返回 archived=true，主列表不再包含；false 恢复后回到主列表", async () => {
+    const project = await createProject({ name: "官网改版" });
+    await seedTask(project.id, { title: "任务" });
+
+    const archive = await patchRoute(
+      jsonReq(`/api/projects/${project.id}`, "PATCH", { archived: true }),
+      ctx(project.id),
+    );
+    expect(archive.status).toBe(200);
+    expect(((await archive.json()) as { archived: boolean }).archived).toBe(true);
+
+    const list = await listRoute();
+    expect(((await list.json()) as ProjectListJson[]).map((row) => row.id)).not.toContain(
+      project.id,
+    );
+
+    const restore = await patchRoute(
+      jsonReq(`/api/projects/${project.id}`, "PATCH", { archived: false }),
+      ctx(project.id),
+    );
+    expect(restore.status).toBe(200);
+    expect(((await restore.json()) as { archived: boolean }).archived).toBe(false);
+
+    const listAfter = await listRoute();
+    expect(((await listAfter.json()) as ProjectListJson[]).map((row) => row.id)).toContain(
+      project.id,
+    );
+  });
+
+  it("archived 非法值（字符串 / 数字 / null）→ 400 且不落库", async () => {
+    const project = await createProject({ name: "项目一" });
+    for (const bad of ["true", 1, null]) {
+      const res = await patchRoute(
+        jsonReq(`/api/projects/${project.id}`, "PATCH", { archived: bad }),
+        ctx(project.id),
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("archived");
+    }
+    const after = await prisma.project.findUnique({ where: { id: project.id } });
+    expect(after?.archived).toBe(false);
+  });
+
+  it("archived 非布尔值在归档项目中同样拒绝（false → true 的非法输入不变更状态）", async () => {
+    const project = await createProject({ name: "项目一" });
+    await patchRoute(
+      jsonReq(`/api/projects/${project.id}`, "PATCH", { archived: true }),
+      ctx(project.id),
+    );
+    const res = await patchRoute(
+      jsonReq(`/api/projects/${project.id}`, "PATCH", { archived: "yes" }),
+      ctx(project.id),
+    );
+    expect(res.status).toBe(400);
+    const after = await prisma.project.findUnique({ where: { id: project.id } });
+    expect(after?.archived).toBe(true); // 非法输入不变更既有状态
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/projects/:id（Issue #43）
+// ---------------------------------------------------------------------------
+
+describe("DELETE /api/projects/:id", () => {
+  it("删除成功 → 204 no-store；项目消失，其下任务保留且 projectId 置空", async () => {
+    const project = await createProject({ name: "待删项目" });
+    const task = await seedTask(project.id, { title: "项目里的任务" });
+
+    const res = await deleteRoute(projectReq(project.id, "DELETE"), ctx(project.id));
+    expect(res.status).toBe(204);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+
+    const gone = await projectRoute(projectReq(project.id, "GET"), ctx(project.id));
+    expect(gone.status).toBe(404);
+
+    const list = await listRoute();
+    expect(((await list.json()) as ProjectListJson[]).map((row) => row.id)).not.toContain(
+      project.id,
+    );
+
+    const remaining = await prisma.task.findUnique({ where: { id: task.id } });
+    expect(remaining).not.toBeNull();
+    expect(remaining?.title).toBe("项目里的任务");
+    expect(remaining?.projectId).toBeNull();
+  });
+
+  it("删除不存在的项目 → 404 { error }", async () => {
+    const res = await deleteRoute(projectReq("no-such-id", "DELETE"), ctx("no-such-id"));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "项目不存在：no-such-id" });
+  });
+
+  it("已归档项目可直接删除", async () => {
+    const project = await createProject({ name: "归档后删除" });
+    await prisma.project.update({ where: { id: project.id }, data: { archived: true } });
+
+    const res = await deleteRoute(projectReq(project.id, "DELETE"), ctx(project.id));
+    expect(res.status).toBe(204);
+    expect(await prisma.project.count()).toBe(0);
   });
 });
 
