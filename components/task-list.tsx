@@ -1,15 +1,24 @@
 "use client";
 
-// 任务行交互组件（Issue #25、Issue #27、docs/01-architecture.md「模块边界」）：
-// 展示标题、优先级标记与截止日期（统一 YYYY-MM-DD），并承接两个写操作入口：
+// 任务行交互组件（Issue #25、Issue #27、Issue #39、docs/01-architecture.md「模块边界」）：
+// 展示标题、标签徽标、优先级标记与截止日期（统一 YYYY-MM-DD），并承接两个写操作入口：
 // - 点击行主体 → onEdit 打开编辑弹层（数据由父级 TodayBoard 持有）；
 // - 「完成」按钮 → onComplete 调 PATCH /api/tasks/:id 设 status=done。
 // 组件本身只回调、不发请求；列表数据仍由 Server Component 查询后传入。
 // 只读形态（Issue #27，项目详情页复用）：不传 onEdit / onComplete 时行不可点击、
 // 无「完成」按钮；showStatus 为 true 时为进行中/已完成任务渲染状态徽标
 // （今日视图默认关闭，展示行为不变）。
+// 标签徽标（Issue #39）：彩色小圆点（ColorDot 风格）+ 名称，无标签不占位。
 
+import { ColorDot } from "@/components/color-dot";
 import { formatLocalDate } from "@/components/today-form";
+
+/** 任务行展示的标签摘要（lib/db TaskTagSummary 的展示形态）。 */
+export interface TaskTagItem {
+  id: string;
+  name: string;
+  color: string | null;
+}
 
 export interface TaskListItem {
   id: string;
@@ -23,6 +32,8 @@ export interface TaskListItem {
   dueDate: Date | null;
   /** 所属项目 id（null = 无项目）；编辑弹层「所属项目」下拉预填用（Issue #27）。 */
   projectId: string | null;
+  /** 绑定的标签摘要（按标签名升序）；未提供时不渲染徽标（Issue #39）。 */
+  tags?: TaskTagItem[];
 }
 
 /** 优先级标记：中性底色的小徽标，避免与逾期样式混淆（编辑弹层的下拉标签也复用这里的文案）。 */
@@ -59,6 +70,19 @@ function StatusBadge({ status }: { status: string }) {
       className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-xs font-medium ${style.className}`}
     >
       {style.label}
+    </span>
+  );
+}
+
+/** 标签徽标（Issue #39）：彩色小圆点 + 名称；无标签不渲染、不占位。 */
+function TagBadge({ tag }: { tag: TaskTagItem }) {
+  return (
+    <span
+      data-testid="tag-badge"
+      className="inline-flex max-w-[9rem] shrink-0 items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 py-0.5 pl-1.5 pr-2 text-xs text-neutral-600"
+    >
+      <ColorDot color={tag.color} />
+      <span className="min-w-0 truncate">{tag.name}</span>
     </span>
   );
 }
@@ -130,7 +154,16 @@ function RowContent({
 }) {
   return (
     <>
-      <span className="min-w-0 truncate text-sm font-medium text-neutral-900">{task.title}</span>
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="min-w-0 truncate text-sm font-medium text-neutral-900">{task.title}</span>
+        {task.tags && task.tags.length > 0 ? (
+          <span className="flex min-w-0 items-center gap-1">
+            {task.tags.map((tag) => (
+              <TagBadge key={tag.id} tag={tag} />
+            ))}
+          </span>
+        ) : null}
+      </span>
       <span className="flex shrink-0 items-center gap-2">
         {showStatus ? <StatusBadge status={task.status} /> : null}
         <PriorityBadge priority={task.priority} />

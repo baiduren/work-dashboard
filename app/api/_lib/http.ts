@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 
 import { ProjectNotFoundError } from "@/lib/db/projects";
+import { TagNotFoundError } from "@/lib/db/tags";
 import { TaskNotFoundError } from "@/lib/db/tasks";
 import { TaskValidationError } from "@/lib/domain/task";
 
@@ -25,12 +26,14 @@ export function jsonError(status: number, error: string): NextResponse {
 
 /**
  * 把领域/数据层异常映射为响应（docs/01-architecture.md「接口约定」）：
- * TaskValidationError（可识别的校验错误）→ 400，message 面向调用方；
- * TaskNotFoundError / ProjectNotFoundError → 404；未知错误 → 500 固定文案，不携带堆栈或内部信息。
+ * TaskValidationError（可识别的校验错误，含子类 TagValidationError）→ 400，message 面向调用方；
+ * TaskNotFoundError / ProjectNotFoundError / TagNotFoundError → 404；
+ * 未知错误 → 500 固定文案，不携带堆栈或内部信息。
  */
 export function toErrorResponse(error: unknown): NextResponse {
   if (error instanceof TaskValidationError) return jsonError(400, error.message);
   if (error instanceof TaskNotFoundError) return jsonError(404, error.message);
   if (error instanceof ProjectNotFoundError) return jsonError(404, error.message);
+  if (error instanceof TagNotFoundError) return jsonError(404, error.message);
   return jsonError(500, "服务器内部错误");
 }

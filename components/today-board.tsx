@@ -1,18 +1,21 @@
 "use client";
 
-// 今日视图的交互容器（Issue #25）：持有编辑弹层、完成/撤销与行隐藏的客户端状态。
+// 今日视图的交互容器（Issue #25；Issue #39 增加标签徽标筛选）：持有编辑弹层、
+// 完成/撤销、行隐藏与标签筛选的客户端状态。
 // 数据获取仍由 Server Component 完成（app/page.tsx 查询后传入分节数组）；
 // 写操作全部走现有 HTTP API（PATCH /api/tasks/:id），成功后 router.refresh()
 // 让 Server Component 重新渲染（docs/01-architecture.md「模块边界」）。
 // - 完成：PATCH status=done 成功后立即隐藏该行并弹出「已标记完成 · 撤销」提示（6 秒自动消失）；
 // - 撤销：PATCH status=完成前的状态（todo/doing），行回到原组；
+// - 标签筛选（Issue #39）：「全部标签」+ 各标签下拉，选中后按当前列表内 tags
+//   前端过滤（本工单不做服务端 ?tagId= 参数，服务端筛选并入后续搜索筛选工单）；
 // - 已完成任务的查询语义不变：done 不出现在今日视图（lib/db listTasks）。
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { EditTaskModal } from "@/components/edit-task-modal";
-import { TaskList, type TaskListItem } from "@/components/task-list";
+import { TaskList, type TaskListItem, type TaskTagItem } from "@/components/task-list";
 import { apiErrorMessage } from "@/components/today-form";
 import { parseStatus, type TaskStatus } from "@/lib/domain/task";
 
@@ -38,6 +41,21 @@ export function TodayBoard({ sections }: { sections: readonly TodaySectionData[]
   const [editing, setEditing] = useState<TaskListItem | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [undoing, setUndoing] = useState(false);
+  // 标签筛选："" 表示「全部标签」；选中后按当前列表内 tags 前端过滤（Issue #39）。
+  const [tagFilter, setTagFilter] = useState("");
+
+  // 汇总当前列表里出现过的标签（按名称排序去重），作为筛选下拉的选项。
+  const knownTags = useMemo<TaskTagItem[]>(() => {
+    const byId = new Map<string, TaskTagItem>();
+    for (const section of sections) {
+      for (const task of section.tasks) {
+        for (const tag of task.tags ?? []) {
+          if (!byId.has(tag.id)) byId.set(tag.id, tag);
+        }
+      }
+    }
+    return [...byId.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  }, [sections]);
 
   // 提示自动消失；每条新提示重置计时。
   useEffect(() => {
@@ -116,11 +134,39 @@ export function TodayBoard({ sections }: { sections: readonly TodaySectionData[]
 
   const visibleSections = sections.map((section) => ({
     ...section,
-    tasks: section.tasks.filter((task) => !hiddenIds.has(task.id)),
+    tasks: section.tasks.filter(
+      (task) =>
+        !hiddenIds.has(task.id) &&
+        (tagFilter === "" || (task.tags ?? []).some((tag) => tag.id === tagFilter)),
+    ),
   }));
 
   return (
     <div className="mt-6 space-y-8">
+      {knownTags.length > 0 ? (
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="today-tag-filter"
+            className="shrink-0 text-sm font-medium text-neutral-700"
+          >
+            按标签筛选
+          </label>
+          <select
+            id="today-tag-filter"
+            value={tagFilter}
+            onChange={(event) => setTagFilter(event.target.value)}
+            aria-label="按标签筛选"
+            className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 outline-none focus:border-neutral-900"
+          >
+            <option value="">全部标签</option>
+            {knownTags.map((tag) => (
+              <option key={tag.id} value={tag.id}>
+                {tag.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       {visibleSections.map((section) => (
         <section key={section.key}>
           <h2 className="flex items-baseline gap-2 text-sm font-semibold text-neutral-900">
@@ -140,7 +186,7 @@ export function TodayBoard({ sections }: { sections: readonly TodaySectionData[]
               />
             ) : (
               <p className="rounded-lg border border-dashed border-neutral-200 px-3 py-4 text-sm text-neutral-400">
-                {section.emptyText}
+                {tagFilter !== "" ? "该组没有带选中标签的任务" : section.emptyText}
               </p>
             )}
           </div>

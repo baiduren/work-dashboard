@@ -6,6 +6,7 @@
 // （docs/01-architecture.md「接口约定」；沿用现有错误类型即可被 400 映射）。
 
 import { TaskValidationError } from "./task";
+import { parseHexColor } from "./color";
 
 /** 项目名最大长度（Issue #27：trim 后超过 60 字符拒绝）。 */
 export const PROJECT_NAME_MAX_LENGTH = 60;
@@ -22,9 +23,6 @@ export const PROJECT_COLORS: readonly string[] = [
 
 /** 新建项目表单的默认颜色。 */
 export const DEFAULT_PROJECT_COLOR = "#3b82f6";
-
-/** #RRGGBB 十六进制颜色。 */
-const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 /** 校验项目名：必须是非空字符串（首尾空白会被裁掉），trim 后超过 60 字符拒绝。 */
 export function parseProjectName(value: unknown): string {
@@ -50,24 +48,10 @@ export function parseProjectName(value: unknown): string {
 /**
  * 校验项目颜色：`#RRGGBB` 十六进制；undefined / null / 空串 / 纯空白视为 null（清空颜色）。
  * 其余值（格式非法、类型不对）抛出 TaskValidationError。
+ * 规则实现在 lib/domain/color.ts（Issue #39 提取共用，标签颜色同规则）。
  */
 export function parseProjectColor(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "string") {
-    throw new TaskValidationError(
-      `color 必须是 #RRGGBB 十六进制字符串或 null，收到：${stringify(value)}`,
-      "color",
-    );
-  }
-  const color = value.trim();
-  if (color.length === 0) return null;
-  if (!COLOR_PATTERN.test(color)) {
-    throw new TaskValidationError(
-      `color 必须是 #RRGGBB 格式的十六进制颜色，收到：${JSON.stringify(value)}`,
-      "color",
-    );
-  }
-  return color;
+  return parseHexColor(value, "color");
 }
 
 /** updateProject 的输入：仅允许 name / color。 */

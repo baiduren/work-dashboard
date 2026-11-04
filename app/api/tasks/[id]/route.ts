@@ -1,11 +1,12 @@
-// 单个任务接口（docs/01-architecture.md「接口约定（草案）」、Issue #19、Issue #23）：
-// - GET    /api/tasks/:id：存在返回任务，不存在 404；
-// - PATCH  /api/tasks/:id：更新 title/notes/priority/dueDate/projectId/status，
+// 单个任务接口（docs/01-architecture.md「接口约定（草案）」、Issue #19、Issue #23、Issue #39）：
+// - GET    /api/tasks/:id：存在返回任务（含标签摘要 tags），不存在 404；
+// - PATCH  /api/tasks/:id：更新 title/notes/priority/dueDate/projectId/status/tagIds，
 //   未知字段或非法值 → 400。字段更新与 status 变更经 lib/db 的 updateTaskWithStatus
 //   在同一事务内落库（任一步失败整体回滚，不留部分更新）；status 变更沿用领域规则
 //   维护 completedAt（进入 done 写入、离开 done 清空、done→done 保留首次时间），
 //   并把任务追加到目标列末尾、原列重排为 0..n-1（等价于 /move 移到列尾，
-//   保证两列 orderIndex 连续无重复）；列内位置微调仍走 /move；
+//   保证两列 orderIndex 连续无重复）；tagIds 提供时在同一事务内全量替换任务标签
+//   （未提供则不动标签）；列内位置微调仍走 /move；
 // - DELETE /api/tasks/:id：成功 204，不存在 404。
 // 认证由 middleware.ts 统一保护（未登录 401），本文件不新增认证逻辑。
 
@@ -23,12 +24,21 @@ import {
   getTask,
   updateTaskWithStatus,
   type TaskRecord,
+  type UpdateTaskPatch,
 } from "@/lib/db/tasks";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 /** PATCH 允许更新的字段；其余（如 orderIndex、id、createdAt）一律 400，列内重排走 /move。 */
-const PATCHABLE_FIELDS = new Set(["title", "notes", "priority", "dueDate", "projectId", "status"]);
+const PATCHABLE_FIELDS = new Set([
+  "title",
+  "notes",
+  "priority",
+  "dueDate",
+  "projectId",
+  "status",
+  "tagIds",
+]);
 
 export async function GET(_request: NextRequest, context: RouteContext): Promise<NextResponse> {
   const { id } = await context.params;
@@ -62,6 +72,8 @@ export async function PATCH(request: NextRequest, context: RouteContext): Promis
   }
 
   // 先整体校验（值合法性），全部通过才落库，避免部分字段写入后另一字段被拒。
+  // tagIds 的取值校验（parseTagIds）在 updateTaskWithStatus 事务外先行完成，
+  // 存在性校验（任务/标签是否真实存在）在事务内进行并与字段更新同生共死。
   let patch: NormalizedTaskPatch;
   try {
     patch = normalizeTaskPatch(source);
@@ -77,13 +89,20 @@ export async function PATCH(request: NextRequest, context: RouteContext): Promis
     }
   }
 
+  // 组装数据层补丁：normalizeTaskPatch 只挑选字段更新项，tagIds 原样透传给
+  // updateTaskWithStatus（内部经 parseTagIds 校验；未提供时不动既有标签）。
+  const dbPatch: UpdateTaskPatch = { ...patch };
+  if (source.tagIds !== undefined) {
+    dbPatch.tagIds = source.tagIds as string[];
+  }
+
   try {
     let task: TaskRecord | null = null;
-    if (Object.keys(patch).length === 0 && nextStatus === null) {
+    if (Object.keys(dbPatch).length === 0 && nextStatus === null) {
       task = await getTask(id); // 空 PATCH：不改动任何字段，返回当前任务
     } else {
-      // 字段更新与状态变更（含列内重排）在同一事务内完成，不再拆成两次独立写入。
-      task = await updateTaskWithStatus(id, patch, nextStatus ?? undefined);
+      // 字段更新与状态变更（含列内重排）、标签绑定在同一事务内完成，不再拆成多次独立写入。
+      task = await updateTaskWithStatus(id, dbPatch, nextStatus ?? undefined);
     }
     if (!task) return jsonError(404, `任务不存在：${id}`);
     return jsonOk(task);
