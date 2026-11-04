@@ -1,5 +1,5 @@
-// 项目详情页（Issue #27）：项目名/颜色 + 该项目全部状态的任务列表（只读）。
-// 数据只经 lib/db 查询：getProject + listTasks("project", { projectId })
+// 项目详情页（Issue #27、Issue #39）：项目名/颜色 + 该项目全部状态的任务列表（只读，
+// 任务行带标签徽标）。数据只经 lib/db 查询：getProject + listTasks("project", { projectId })
 // （project 视图含全部状态：todo → doing → done，组内按 orderIndex，见 lib/db/tasks）。
 // 列表复用 TaskList 的只读形态：不传 onEdit / onComplete，行不可编辑、无「完成」按钮，
 // 并以状态徽标区分进行中 / 已完成任务。项目不存在 → notFound()（404）。
@@ -31,6 +31,7 @@ function toListItem(task: TaskRecord): TaskListItem {
     priority: task.priority,
     dueDate: task.dueDate,
     projectId: task.projectId,
+    tags: task.tags,
   };
 }
 

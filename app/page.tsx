@@ -1,6 +1,6 @@
-// 今日视图首页（docs/00-product-brief.md「核心场景 1 今日」、Issue #21、Issue #25）：
-// 展示「今天到期 / 已逾期 / 待安排」三组未完成任务，并提供最小写操作闭环：
-// 顶部快速添加（默认今天到期）、点行编辑、行内「完成」与撤销；
+// 今日视图首页（docs/00-product-brief.md「核心场景 1 今日」、Issue #21、Issue #25、Issue #39）：
+// 展示「今天到期 / 已逾期 / 待安排」三组未完成任务（含标签徽标），并提供最小写操作闭环：
+// 顶部快速添加（默认今天到期）、点行编辑、行内「完成」与撤销；任务列表上方可按标签筛选；
 // 另有数据导出 / 导入入口（Issue #37，docs/01-architecture.md「数据导出 / 导入」）。
 // 数据只经 lib/db 的 listTasks 查询（不直接调用 Prisma client、不发 HTTP）；
 // 写操作由交互组件（Client Component）调用现有 HTTP API 后 router.refresh() 回到这里刷新。
@@ -32,6 +32,7 @@ function toListItem(task: TaskRecord): TaskListItem {
     priority: task.priority,
     dueDate: task.dueDate,
     projectId: task.projectId,
+    tags: task.tags,
   };
 }
 
