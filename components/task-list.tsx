@@ -1,6 +1,6 @@
 "use client";
 
-// 任务行交互组件（Issue #25、Issue #27、Issue #39、Issue #50、docs/01-architecture.md「模块边界」）：
+// 任务行交互组件（Issue #25、Issue #27、Issue #39、Issue #50、Issue #52、docs/01-architecture.md「模块边界」）：
 // 展示标题、标签徽标、优先级标记与截止日期（统一 YYYY-MM-DD），并承接两个写操作入口：
 // - 点击行主体 → onEdit 打开编辑弹层（数据由父级持有）；
 // - 「完成」按钮 → onComplete 调 PATCH /api/tasks/:id 设 status=done。
@@ -12,6 +12,14 @@
 // 每行多一行「归类到 今天 / 明天 / 下周一」按钮（+「更多…」打开编辑弹层），
 // 其余视图不传该 prop，行结构之外的样式与行为不变。
 // 标签徽标（Issue #39）：彩色小圆点（ColorDot 风格）+ 名称，无标签不占位。
+// 组内拖拽（Issue #52）：sortable 传入时每行左侧渲染拖拽把手（键盘与指针均可拖拽），
+// 行主体与「完成」按钮保持原有交互——拖拽把手单独承接 dnd-kit 的 listeners，
+// 避免 Space 键在按钮上被拖拽传感器抢占（与看板卡片整块可拖的差异见组件注释）。
+
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
+import type { CSSProperties } from "react";
 
 import { ColorDot } from "@/components/color-dot";
 import { formatLocalDate } from "@/components/today-form";
@@ -113,6 +121,16 @@ function ProjectBadge({ name, color }: { name: string; color: string | null }) {
   );
 }
 
+/** 拖拽把手需要从 useSortable 透传到行上的属性与样式。 */
+interface TaskRowDrag {
+  setNodeRef: (node: HTMLLIElement | null) => void;
+  style: CSSProperties;
+  attributes: DraggableAttributes;
+  listeners: DraggableSyntheticListeners;
+  disabled: boolean;
+  dragging: boolean;
+}
+
 function TaskRow({
   task,
   overdue,
@@ -120,6 +138,7 @@ function TaskRow({
   showStatus,
   onEdit,
   onComplete,
+  drag,
   quickClassifyOptions,
   onQuickClassify,
   classifying,
@@ -130,6 +149,7 @@ function TaskRow({
   showStatus?: boolean;
   onEdit?: (task: TaskListItem) => void;
   onComplete?: (task: TaskListItem) => void;
+  drag?: TaskRowDrag;
   quickClassifyOptions?: readonly QuickClassifyOption[];
   onQuickClassify?: (task: TaskListItem, dueDate: string) => void;
   classifying?: boolean;
@@ -137,13 +157,32 @@ function TaskRow({
   const interactive = onEdit !== undefined && onComplete !== undefined;
   return (
     <li
-      className={
+      ref={drag?.setNodeRef}
+      style={drag?.style}
+      className={`rounded-lg border px-3 py-2.5 ${
         overdue
-          ? "rounded-lg border border-l-4 border-red-200 border-l-red-500 bg-red-50 px-3 py-2.5"
-          : "rounded-lg border border-neutral-200 bg-white px-3 py-2.5"
-      }
+          ? "border-l-4 border-red-200 border-l-red-500 bg-red-50"
+          : "border-neutral-200 bg-white"
+      } ${drag?.dragging ? "opacity-40" : ""}`}
     >
       <div className="flex items-center justify-between gap-3">
+        {drag ? (
+          // 拖拽把手：只在这里挂 dnd-kit 的 listeners，按钮与行主体的点击/键盘行为不变。
+          <button
+            type="button"
+            {...drag.attributes}
+            {...drag.listeners}
+            disabled={drag.disabled}
+            aria-label={`拖动任务：${task.title}`}
+            className={`-ml-1 shrink-0 touch-none select-none rounded p-1 text-neutral-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 ${
+              drag.disabled
+                ? "cursor-default opacity-40"
+                : "cursor-grab hover:text-neutral-700 active:cursor-grabbing"
+            }`}
+          >
+            <GripIcon />
+          </button>
+        ) : null}
         {/* 可编辑视图：行主体可点击打开编辑弹层（键盘可用，原生 button）；
             只读视图（项目详情页）：行主体为纯展示，不可点击。 */}
         {interactive ? (
@@ -216,6 +255,60 @@ function TaskRow({
   );
 }
 
+/**
+ * 可拖拽任务行（Issue #52）：useSortable 绑定行节点与拖拽把手；
+ * 行主体、「完成」按钮与编辑弹层入口不挂 listeners，Space / 回车仍按原语义工作。
+ */
+function SortableTaskRow(props: {
+  task: TaskListItem;
+  overdue: boolean;
+  completing: boolean;
+  showStatus?: boolean;
+  onEdit?: (task: TaskListItem) => void;
+  onComplete?: (task: TaskListItem) => void;
+  disabled: boolean;
+  dragging: boolean;
+  quickClassifyOptions?: readonly QuickClassifyOption[];
+  onQuickClassify?: (task: TaskListItem, dueDate: string) => void;
+  classifying?: boolean;
+}) {
+  const { task, disabled, dragging, ...rowProps } = props;
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: task.id,
+    disabled,
+    data: { type: "card" },
+  });
+
+  return (
+    <TaskRow
+      {...rowProps}
+      task={task}
+      drag={{
+        setNodeRef,
+        style: { transform: CSS.Translate.toString(transform), transition },
+        attributes,
+        listeners,
+        disabled,
+        dragging,
+      }}
+    />
+  );
+}
+
+/** 拖拽把手图标（纯装饰，可访问名称由按钮的 aria-label 提供）。 */
+function GripIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="currentColor">
+      <circle cx="6" cy="5" r="1.4" />
+      <circle cx="14" cy="5" r="1.4" />
+      <circle cx="6" cy="10" r="1.4" />
+      <circle cx="14" cy="10" r="1.4" />
+      <circle cx="6" cy="15" r="1.4" />
+      <circle cx="14" cy="15" r="1.4" />
+    </svg>
+  );
+}
+
 function RowContent({
   task,
   overdue,
@@ -256,11 +349,38 @@ function RowContent({
 }
 
 /**
+ * 拖拽浮层里的任务行副本（Issue #52）：只展示行内容，不带编辑 / 完成按钮与拖拽把手，
+ * 视觉与行主体一致；宽度由调用方（DragOverlay 容器）控制。
+ */
+export function TaskRowPreview({ task, overdue }: { task: TaskListItem; overdue: boolean }) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 shadow-lg ring-1 ring-neutral-900/10 ${
+        overdue
+          ? "border-l-4 border-red-200 border-l-red-500 bg-red-50"
+          : "border-neutral-200 bg-white"
+      }`}
+    >
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+        <RowContent task={task} overdue={overdue} />
+      </div>
+    </div>
+  );
+}
+
+/** 组内拖拽状态：在途任务禁用再次拖拽，正在拖动的行淡化（Issue #52）。 */
+export interface TaskListSortableOptions {
+  disabledIds: ReadonlySet<string>;
+  draggingId: string | null;
+}
+
+/**
  * 任务列表：`overdue` 为 true 时按「已逾期」醒目样式渲染（docs/00-product-brief.md「核心场景 1 今日」）。
  * 传入 onEdit + onComplete 为可编辑形态（今日 / 收件箱视图）；两者都不传为只读形态
  * （项目详情页 / 回顾页），此时 showStatus 控制是否渲染进行中/已完成状态徽标。
  * 收件箱（Issue #50）额外传入 quickClassifyOptions + onQuickClassify，为每行渲染
  * 今天 / 明天 / 下周一快捷归类按钮；其余视图不传，行为与样式不变。
+ * 今日视图传入 sortable 时每行左侧出现拖拽把手（Issue #52 组内排序）；其余场景不传。
  */
 export function TaskList({
   tasks,
@@ -269,6 +389,7 @@ export function TaskList({
   showStatus = false,
   onEdit,
   onComplete,
+  sortable,
   quickClassifyOptions,
   onQuickClassify,
   classifyingId,
@@ -279,6 +400,7 @@ export function TaskList({
   showStatus?: boolean;
   onEdit?: (task: TaskListItem) => void;
   onComplete?: (task: TaskListItem) => void;
+  sortable?: TaskListSortableOptions;
   /** 收件箱行内快捷归类按钮（Issue #50）；不传则行内不渲染该区域。 */
   quickClassifyOptions?: readonly QuickClassifyOption[];
   /** 点击快捷归类按钮回调；dueDate 为按钮对应的目标日期（YYYY-MM-DD）。 */
@@ -288,20 +410,37 @@ export function TaskList({
 }) {
   return (
     <ul className="space-y-2">
-      {tasks.map((task) => (
-        <TaskRow
-          key={task.id}
-          task={task}
-          overdue={overdue}
-          completing={completingId === task.id}
-          showStatus={showStatus}
-          onEdit={onEdit}
-          onComplete={onComplete}
-          quickClassifyOptions={quickClassifyOptions}
-          onQuickClassify={onQuickClassify}
-          classifying={classifyingId === task.id}
-        />
-      ))}
+      {tasks.map((task) =>
+        sortable ? (
+          <SortableTaskRow
+            key={task.id}
+            task={task}
+            overdue={overdue}
+            completing={completingId === task.id}
+            showStatus={showStatus}
+            onEdit={onEdit}
+            onComplete={onComplete}
+            disabled={sortable.disabledIds.has(task.id)}
+            dragging={sortable.draggingId === task.id}
+            quickClassifyOptions={quickClassifyOptions}
+            onQuickClassify={onQuickClassify}
+            classifying={classifyingId === task.id}
+          />
+        ) : (
+          <TaskRow
+            key={task.id}
+            task={task}
+            overdue={overdue}
+            completing={completingId === task.id}
+            showStatus={showStatus}
+            onEdit={onEdit}
+            onComplete={onComplete}
+            quickClassifyOptions={quickClassifyOptions}
+            onQuickClassify={onQuickClassify}
+            classifying={classifyingId === task.id}
+          />
+        ),
+      )}
     </ul>
   );
 }

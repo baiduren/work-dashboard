@@ -6,7 +6,8 @@
 //
 // 写操作走现有 HTTP API：拖动结束后调用 POST /api/tasks/:id/move，body { status, orderIndex }，
 // orderIndex 语义见 docs/01-architecture.md「接口约定」（移除被拖任务后在目标列中的插入下标），
-// 换算抽在 components/kanban-form.ts（纯函数，tests/kanban-form.test.ts 覆盖）。
+// 换算抽在 components/kanban-form.ts（status 包装）与 components/drag-lists-form.ts
+// （Issue #52 起与今日视图共用的通用实现，tests/kanban-form.test.ts 覆盖）。
 //
 // 交互细节：
 // - 乐观更新：拖动结束先本地重排，接口失败回滚到拖动前状态并显示错误提示；
@@ -20,29 +21,15 @@ import { useRouter } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
-  KeyboardSensor,
-  PointerSensor,
-  pointerWithin,
-  rectIntersection,
-  useDroppable,
-  useSensor,
-  useSensors,
   type Announcements,
-  type Collision,
   type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
 import {
-  columnDroppableId,
   computeDragTarget,
   moveTaskInColumns,
   statusFromDroppableId,
@@ -50,11 +37,17 @@ import {
   type KanbanCardData,
   type KanbanColumns,
 } from "@/components/kanban-form";
+import {
+  createCardFirstCollisionDetection,
+  DragToast,
+  SortableListContainer,
+  TOAST_AUTO_DISMISS_MS,
+  useAutoDismissToast,
+  useSortableSensors,
+} from "@/components/sortable-lists";
 import { PRIORITY_STYLES } from "@/components/task-list";
 import { apiErrorMessage, formatLocalDate } from "@/components/today-form";
 import { TASK_STATUSES, type TaskStatus } from "@/lib/domain/task";
-
-const TOAST_AUTO_DISMISS_MS = 6000;
 
 /** 列定义：与任务状态一一对应（docs/01-architecture.md「数据模型」）。 */
 const COLUMN_META: readonly { status: TaskStatus; heading: string; emptyText: string }[] = [
@@ -74,7 +67,7 @@ export function KanbanBoard({ columns: initialColumns }: { columns: KanbanColumn
   const [columns, setColumns] = useState<KanbanColumns>(initialColumns);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [movingIds, setMovingIds] = useState<ReadonlySet<string>>(() => new Set<string>());
-  const [toast, setToast] = useState<string | null>(null);
+  const { toast, setToast } = useAutoDismissToast<string>(TOAST_AUTO_DISMISS_MS);
 
   const idColumns = useMemo(
     () => ({
@@ -91,31 +84,14 @@ export function KanbanBoard({ columns: initialColumns }: { columns: KanbanColumn
     if (movingIds.size === 0) setColumns(initialColumns);
   }, [initialColumns, movingIds]);
 
-  // 提示自动消失；每条新提示重置计时。
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), TOAST_AUTO_DISMISS_MS);
-    return () => clearTimeout(timer);
-  }, [toast]);
-
   // 指针/触摸共用 PointerSensor：移动 5px 才启动拖拽（Issue #31 的距离阈值要求）。
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useSortableSensors();
 
-  // 落点判定：指针下的卡片优先于列容器（卡片决定插入下标，列空白处决定追加到列尾）；
-  // 无指针坐标（键盘拖拽）时退化为矩形相交，同样优先卡片。
-  const collisionDetection: CollisionDetection = useCallback((args) => {
-    const collisions = pointerWithin(args).length > 0 ? pointerWithin(args) : rectIntersection(args);
-    const containers: Collision[] = [];
-    const cards: Collision[] = [];
-    for (const collision of collisions) {
-      if (statusFromDroppableId(String(collision.id))) containers.push(collision);
-      else cards.push(collision);
-    }
-    return cards.length > 0 ? cards : containers;
-  }, []);
+  // 落点判定：卡片优先于列容器（卡片决定插入下标，列空白处决定追加到列尾）。
+  const collisionDetection: CollisionDetection = useMemo(
+    () => createCardFirstCollisionDetection((id) => statusFromDroppableId(id) !== null),
+    [],
+  );
 
   const findCard = useCallback(
     (id: string): KanbanCardData | null => {
@@ -226,15 +202,7 @@ export function KanbanBoard({ columns: initialColumns }: { columns: KanbanColumn
 
       <DragOverlay>{activeCard ? <OverlayCard card={activeCard} /> : null}</DragOverlay>
 
-      {toast ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full bg-neutral-900 px-4 py-2 text-sm text-white shadow-lg"
-        >
-          {toast}
-        </div>
-      ) : null}
+      {toast ? <DragToast message={toast} /> : null}
     </DndContext>
   );
 }
@@ -251,42 +219,39 @@ function KanbanColumn({
   draggingId: string | null;
 }) {
   // 列容器也是落点：拖到列空白处 / 空列时追加到列尾。
-  const { setNodeRef, isOver } = useDroppable({
-    id: columnDroppableId(meta.status),
-    data: { type: "column" },
-  });
   const items = useMemo(() => cards.map((card) => card.id), [cards]);
 
   return (
-    <section
-      ref={setNodeRef}
-      aria-label={`${COLUMN_NAMES[meta.status]}列`}
-      className={`flex w-72 shrink-0 flex-col rounded-xl border bg-neutral-100/70 p-2 ${
-        isOver ? "border-neutral-900" : "border-neutral-200"
-      }`}
+    <SortableListContainer
+      listId={meta.status}
+      ariaLabel={`${COLUMN_NAMES[meta.status]}列`}
+      itemIds={items}
+      className={(isOver) =>
+        `flex w-72 shrink-0 flex-col rounded-xl border bg-neutral-100/70 p-2 ${
+          isOver ? "border-neutral-900" : "border-neutral-200"
+        }`
+      }
     >
       <h2 className="flex items-baseline justify-between px-1 pb-1 pt-0.5 text-sm font-semibold text-neutral-900">
         {meta.heading}
         <span className="text-xs font-normal tabular-nums text-neutral-400">{cards.length}</span>
       </h2>
-      <SortableContext items={items} strategy={verticalListSortingStrategy}>
-        <ul className="flex min-h-28 flex-1 flex-col gap-2">
-          {cards.map((card) => (
-            <KanbanCard
-              key={card.id}
-              card={card}
-              disabled={movingIds.has(card.id)}
-              dimmed={draggingId === card.id}
-            />
-          ))}
-          {cards.length === 0 ? (
-            <li className="flex min-h-28 flex-1 items-center justify-center rounded-lg border border-dashed border-neutral-300 px-3 py-4 text-center text-sm text-neutral-400">
-              {meta.emptyText}
-            </li>
-          ) : null}
-        </ul>
-      </SortableContext>
-    </section>
+      <ul className="flex min-h-28 flex-1 flex-col gap-2">
+        {cards.map((card) => (
+          <KanbanCard
+            key={card.id}
+            card={card}
+            disabled={movingIds.has(card.id)}
+            dimmed={draggingId === card.id}
+          />
+        ))}
+        {cards.length === 0 ? (
+          <li className="flex min-h-28 flex-1 items-center justify-center rounded-lg border border-dashed border-neutral-300 px-3 py-4 text-center text-sm text-neutral-400">
+            {meta.emptyText}
+          </li>
+        ) : null}
+      </ul>
+    </SortableListContainer>
   );
 }
 

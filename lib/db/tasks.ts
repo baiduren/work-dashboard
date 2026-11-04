@@ -387,7 +387,8 @@ async function ensureTagExists(tagId: string): Promise<void> {
  * - today：dueDate 在今天之内（含 00:00 与 23:59:59.999）且未完成；
  * - overdue：dueDate 早于今天开始且未完成；
  * - undated：dueDate 为空且未完成；
- *   （三个视图互斥，时间边界由 lib/domain 的 startOfDay / endOfDay 计算，必须提供 now）
+ *   （三个视图互斥，时间边界由 lib/domain 的 startOfDay / endOfDay 计算，必须提供 now；
+ *   Issue #52 起组内排序为 orderIndex 主导、日期兜底，见 listTodayBucket）
  * - board：todo / doing / done 三组，组内按 orderIndex；
  * - project：指定项目的任务，先按 todo→doing→done 再按 orderIndex 排序。
  */
@@ -431,17 +432,31 @@ export async function listTasks(
   }
 }
 
-/** 今日视图三组与 classifyForToday 同一规则：未完成 + dueDate 边界（overdue 严格早于今天开始）。 */
+/**
+ * 今日视图三组与 classifyForToday 同一规则：未完成 + dueDate 边界（overdue 严格早于今天开始）。
+ *
+ * 组内排序（Issue #52）：`orderIndex` 主导、日期兜底——
+ * `[orderIndex asc, dueDate asc, createdAt asc]`。今日三组复用看板的
+ * `orderIndex`（不新增字段 / migration）：组内拖拽产生的移动请求与看板同构，
+ * 走现有 POST /api/tasks/:id/move 同列重排；看板拖动同一任务会同步改变其
+ * 今日顺序（共用 orderIndex 的联动取舍，见 docs/01-architecture.md「接口约定」）。
+ * 未手动排序过的任务 orderIndex 按创建顺序追加到列尾，仍按日期兜底稳定排列。
+ */
 async function listTodayBucket(
   bucket: TodayBucket,
   now: Date,
   filterWhere: Prisma.TaskWhereInput,
 ): Promise<TaskRecord[]> {
-  const commonOrderBy = [{ dueDate: "asc" as const }, { createdAt: "asc" as const }];
+  // orderIndex 是“列内顺序”，今日三组跨 todo/doing 时同值由日期/创建时间兜底（联动取舍见文档）。
+  const commonOrderBy = [
+    { orderIndex: "asc" as const },
+    { dueDate: "asc" as const },
+    { createdAt: "asc" as const },
+  ];
   if (bucket === "undated") {
     const rows = await prisma.task.findMany({
       where: { status: { not: "done" }, dueDate: null, ...filterWhere },
-      orderBy: [{ createdAt: "asc" }],
+      orderBy: [{ orderIndex: "asc" }, { createdAt: "asc" }],
       include: TASK_TAGS_INCLUDE,
     });
     return rows.map(toTaskRecord);

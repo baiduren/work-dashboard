@@ -560,6 +560,109 @@ describe("listTasks", () => {
     expect(undated.map((t) => t.id).sort()).toEqual(expected.undated.sort());
   });
 
+  it("today / overdue / undated 组内按 orderIndex 排序（Issue #52）", async () => {
+    // 今天组：先创建 dueDate 较晚的任务，orderIndex 仍按创建顺序 → 排序以 orderIndex 主导。
+    const todayLate = await createTask(
+      { title: "今天-晚", dueDate: new Date(2026, 10, 2, 20, 0, 0) },
+      NOW,
+    );
+    const todayEarly = await createTask(
+      { title: "今天-早", dueDate: new Date(2026, 10, 2, 8, 0, 0) },
+      NOW,
+    );
+    expect((await listTasks("today", { now: NOW })).map((t) => t.title)).toEqual([
+      todayLate.title,
+      todayEarly.title,
+    ]);
+
+    await moveTask(todayEarly.id, { status: "todo", orderIndex: 0 }, NOW);
+    expect((await listTasks("today", { now: NOW })).map((t) => t.title)).toEqual([
+      todayEarly.title,
+      todayLate.title,
+    ]);
+  });
+
+  it("新建任务 orderIndex 追加到列尾，出现在今日组末尾（Issue #52）", async () => {
+    const a = await createTask(
+      { title: "今天-A", dueDate: new Date(2026, 10, 2, 9, 0, 0) },
+      NOW,
+    );
+    const b = await createTask(
+      { title: "今天-B", dueDate: new Date(2026, 10, 2, 10, 0, 0) },
+      NOW,
+    );
+    await moveTask(a.id, { status: "todo", orderIndex: 1 }, NOW);
+
+    const c = await createTask(
+      { title: "今天-新", dueDate: new Date(2026, 10, 2, 8, 0, 0) },
+      NOW,
+    );
+    expect(c.orderIndex).toBe(2);
+    expect((await listTasks("today", { now: NOW })).map((t) => t.title)).toEqual([
+      b.title,
+      a.title,
+      c.title,
+    ]);
+  });
+
+  it("组内移动 0→2：今日顺序与看板 orderIndex 同步（Issue #52）", async () => {
+    const a = await createTask(
+      { title: "A", dueDate: new Date(2026, 10, 2, 9, 0, 0) },
+      NOW,
+    );
+    const b = await createTask(
+      { title: "B", dueDate: new Date(2026, 10, 2, 9, 0, 0) },
+      NOW,
+    );
+    const c = await createTask(
+      { title: "C", dueDate: new Date(2026, 10, 2, 9, 0, 0) },
+      NOW,
+    );
+
+    await moveTask(a.id, { status: "todo", orderIndex: 2 }, NOW);
+
+    expect((await listTasks("today", { now: NOW })).map((t) => t.title)).toEqual([
+      b.title,
+      c.title,
+      a.title,
+    ]);
+    const board = await listTasks("board");
+    expect(board.todo.map((t) => [t.title, t.orderIndex])).toEqual([
+      ["B", 0],
+      ["C", 1],
+      ["A", 2],
+    ]);
+    expect((await column("todo")).map((t) => [t.title, t.orderIndex])).toEqual([
+      ["B", 0],
+      ["C", 1],
+      ["A", 2],
+    ]);
+  });
+
+  it("overdue / undated 组同样按 orderIndex 排序（Issue #52）", async () => {
+    const overdueRecent = await createTask(
+      { title: "逾期-较近", dueDate: new Date(2026, 10, 1, 20, 0, 0) },
+      NOW,
+    );
+    const overdueOld = await createTask(
+      { title: "逾期-较早", dueDate: new Date(2026, 9, 30, 8, 0, 0) },
+      NOW,
+    );
+    await moveTask(overdueOld.id, { status: "todo", orderIndex: 0 }, NOW);
+    expect((await listTasks("overdue", { now: NOW })).map((t) => t.title)).toEqual([
+      overdueOld.title,
+      overdueRecent.title,
+    ]);
+
+    const undatedFirst = await createTask({ title: "待安排-1" }, NOW);
+    const undatedSecond = await createTask({ title: "待安排-2" }, NOW);
+    await moveTask(undatedSecond.id, { status: "todo", orderIndex: 0 }, NOW);
+    expect((await listTasks("undated", { now: NOW })).map((t) => t.title)).toEqual([
+      undatedSecond.title,
+      undatedFirst.title,
+    ]);
+  });
+
   it("project 视图只返回该项目任务，按 todo→doing→done 排序", async () => {
     const p1 = await createProject("项目一");
     const p2 = await createProject("项目二");
