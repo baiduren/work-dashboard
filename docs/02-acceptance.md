@@ -182,6 +182,31 @@
 - [ ] `npm run lint` / `typecheck` / `test` / `build` 全绿；
 - [ ] UI 变更附 Before / After 截图（回顾页有数据态 + 空态 + 周切换，PR 描述用绝对地址引用）。
 
+## 搜索与筛选验收（服务端 q / priority / tagId + 今日 / 看板筛选栏，Issue #51）
+
+依据：[00 产品概要](00-product-brief.md)「核心场景 3 任务」（多维度字段）；
+[01 架构](01-architecture.md)「接口约定」的筛选参数表与「模块边界」（查询在 lib/db、校验在 route 层）；
+Issue #39 预留的 `?tagId=` 服务端筛选在本工单落地。
+
+- [ ] 未登录带筛选参数访问 `GET /api/tasks?view=today&q=…` / `/board?q=…` 返回 401，
+      页面 `/board?q=…` 302 到 `/login?next=…`（middleware 现有行为不变）；
+- [ ] `q` 匹配 title / notes（大小写不敏感仅限 ASCII；中文按原样子串包含，不做分词）；
+      空串 / 纯空白视为未提供，与不传 `q` 结果一致；
+- [ ] `priority=high`、`tagId=<真实 id>` 单独与组合（如 `view=board&priority=high&tagId=x`）
+      均正确过滤；与 today / overdue / undated / board / project 视图叠加生效；
+      board 三列结构保持、列内 `orderIndex` 顺序不乱（不重排）；
+- [ ] `priority=urgent`（及空值 / 大写等非法写法）→ 400；`tagId=不存在` → 400 固定文案
+      「标签不存在」；
+- [ ] 不传任何筛选参数时响应与改动前完全一致（响应结构不变，任务对象仍带 `tags`）；
+- [ ] 今日视图标题行下方筛选栏：输入关键词回车（或停止输入 300ms）后列表变化、
+      URL searchParams 同步；优先级 / 标签下拉即时生效；「清除筛选」一键复位；
+- [ ] 看板筛选栏同样生效（三列各自过滤）；筛选结果为空显示「无匹配任务」，
+      与未筛选时的空列 / 空库真空态区分；今日视图同样区分；
+- [ ] 今日视图原有前端标签筛选保留，与服务端筛选并存（PR 说明两者关系）；
+- [ ] 项目详情页不提供筛选栏（PR 说明：项目内任务少，编辑弹层可查）；
+- [ ] `npm run lint` / `typecheck` / `test` / `build` 全绿；
+- [ ] UI 变更附 Before / After 截图（筛选栏 + 筛选结果 + 空结果态，PR 描述用绝对地址引用）。
+
 ## 收件箱验收（无日期任务集中收纳与一键归类，Issue #50）
 
 依据：[00 产品概要](00-product-brief.md)「核心场景 2 收件箱」——随手记录、稍后归类；

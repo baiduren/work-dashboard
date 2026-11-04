@@ -1,14 +1,16 @@
 "use client";
 
-// 今日视图的交互容器（Issue #25；Issue #39 增加标签徽标筛选）：持有编辑弹层、
-// 完成/撤销、行隐藏与标签筛选的客户端状态。
+// 今日视图的交互容器（Issue #25；Issue #39 增加标签徽标筛选；Issue #51 服务端筛选并存）：
+// 持有编辑弹层、完成/撤销、行隐藏与标签筛选的客户端状态。
 // 数据获取仍由 Server Component 完成（app/page.tsx 查询后传入分节数组）；
 // 写操作全部走现有 HTTP API（PATCH /api/tasks/:id），成功后 router.refresh()
 // 让 Server Component 重新渲染（docs/01-architecture.md「模块边界」）。
 // - 完成：PATCH status=done 成功后立即隐藏该行并弹出「已标记完成 · 撤销」提示（6 秒自动消失）；
 // - 撤销：PATCH status=完成前的状态（todo/doing），行回到原组；
 // - 标签筛选（Issue #39）：「全部标签」+ 各标签下拉，选中后按当前列表内 tags
-//   前端过滤（本工单不做服务端 ?tagId= 参数，服务端筛选并入后续搜索筛选工单）；
+//   前端过滤，作为轻量快捷方式保留；
+// - 服务端筛选（Issue #51）：q / priority / tagId 由 app/page.tsx 按 URL searchParams 查询，
+//   本组件只接收 filtersActive 用于区分「该组无匹配任务」与普通空态；
 // - 已完成任务的查询语义不变：done 不出现在今日视图（lib/db listTasks）。
 
 import { useEffect, useMemo, useState } from "react";
@@ -34,7 +36,14 @@ type ToastState =
 
 const TOAST_AUTO_DISMISS_MS = 6000;
 
-export function TodayBoard({ sections }: { sections: readonly TodaySectionData[] }) {
+export function TodayBoard({
+  sections,
+  filtersActive = false,
+}: {
+  sections: readonly TodaySectionData[];
+  /** URL 中带有 q / priority / tagId 服务端筛选（Issue #51）：空组显示「无匹配任务」文案。 */
+  filtersActive?: boolean;
+}) {
   const router = useRouter();
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [completingId, setCompletingId] = useState<string | null>(null);
@@ -186,7 +195,11 @@ export function TodayBoard({ sections }: { sections: readonly TodaySectionData[]
               />
             ) : (
               <p className="rounded-lg border border-dashed border-neutral-200 px-3 py-4 text-sm text-neutral-400">
-                {tagFilter !== "" ? "该组没有带选中标签的任务" : section.emptyText}
+                {tagFilter !== ""
+                  ? "该组没有带选中标签的任务"
+                  : filtersActive
+                    ? "该组无匹配任务"
+                    : section.emptyText}
               </p>
             )}
           </div>
