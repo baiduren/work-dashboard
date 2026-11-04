@@ -82,6 +82,25 @@
 - [ ] `npm run lint` / `typecheck` / `test` / `build` 全绿；
 - [ ] UI 变更附 Before / After 截图（PR 描述用绝对地址引用）。
 
+## 删除任务验收（编辑弹层删除入口 + 内联二次确认，Issue #41）
+
+- [ ] 未登录访问 `DELETE /api/tasks/:id` 返回 401（middleware 现有行为不变，本工单不改 API）；
+- [ ] 编辑弹层操作区左下角出现红色描边「删除」按钮；单击一次不删除，按钮原地变为
+      「确认删除？」并出现「再想想」；再次点击才发 `DELETE /api/tasks/:id`（不用 `window.confirm`）；
+- [ ] 点击「再想想」、点击弹层其他区域、5 秒无操作超时三者都会把确认态复位为「删除」，
+      任务未被删除；
+- [ ] 确认删除成功（204）后弹层关闭并触发回调（onDeleted，缺省复用 onSaved）：
+      今日视图该任务行消失（router.refresh 生效），`GET /api/tasks?view=board` 中该任务不存在；
+- [ ] 对已不存在的任务（删除返回 404，另一端已删）视为「已删除」：弹层关闭、页面刷新、无报错；
+- [ ] 删除失败（网络异常 / 5xx）时弹层保留并显示固定错误文案（复用 apiErrorMessage），
+      确认态复位，任务仍在；
+- [ ] Esc / 「取消」关闭弹层不触发删除；删除进行中显示「删除中…」并禁用「保存 / 取消」，
+      保存进行中禁用「删除」（互斥防并发）；
+- [ ] 项目详情页只读 TaskList 不受影响（不渲染编辑弹层，不传新 prop 行为不变）；
+- [ ] `npm run lint` / `typecheck` / `test` / `build` 全绿；
+- [ ] UI 变更附 Before / After 截图（Before：弹层底部只有取消 / 保存；After：含「删除」按钮
+      与「确认删除？」确认态两帧，PR 描述用绝对地址引用）。
+
 ## 通用门槛（每个 PR 都要满足）
 
 - [ ] `lint`、`typecheck`、`test`、`build` 全部通过；
