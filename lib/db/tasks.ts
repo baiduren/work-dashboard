@@ -463,6 +463,30 @@ async function listProject(projectId: string): Promise<TaskRecord[]> {
     );
 }
 
+/**
+ * 周回顾查询（Issue #44）：completedAt ∈ [from, to) 的任务——含头不含尾，
+ * 与 lib/domain weekRange 的半开区间对齐；按 completedAt 降序
+ * （同时刻再按 createdAt 降序保持稳定）；不筛项目、不筛状态（完成即完成，
+ * completedAt 只在 done 上有值，见 lib/domain applyStatusChange）。
+ * from / to 不是有效 Date 或 from ≥ to 时抛 TaskValidationError（调用方映射为 400）。
+ */
+export async function listCompletedBetween(from: Date, to: Date): Promise<TaskRecord[]> {
+  const validFrom = from instanceof Date && !Number.isNaN(from.getTime());
+  const validTo = to instanceof Date && !Number.isNaN(to.getTime());
+  if (!validFrom || !validTo) {
+    throw new TaskValidationError("from / to 必须是有效的 Date", "range");
+  }
+  if (from.getTime() >= to.getTime()) {
+    throw new TaskValidationError("from 必须早于 to（含头不含尾区间）", "range");
+  }
+  const rows = await prisma.task.findMany({
+    where: { completedAt: { gte: from, lt: to } },
+    orderBy: [{ completedAt: "desc" }, { createdAt: "desc" }],
+    include: TASK_TAGS_INCLUDE,
+  });
+  return rows.map(toTaskRecord);
+}
+
 async function ensureProjectExists(
   tx: Prisma.TransactionClient,
   projectId: string | null,
