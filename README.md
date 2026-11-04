@@ -160,6 +160,7 @@ docker run -d --name work-dashboard -p 3000:3000 \
 | `npm run lint` | ESLint 检查 |
 | `npm run typecheck` | TypeScript 严格模式类型检查（不产出文件） |
 | `npm run test` | Vitest 单元测试 |
+| `npm run e2e` | Playwright 端到端冒烟（需先 `npm run build`；首次先 `npm run e2e:install`） |
 | `npm run db:generate` | 生成 Prisma Client |
 | `npm run db:migrate` | 创建/应用数据库迁移（开发环境） |
 
@@ -179,7 +180,7 @@ middleware.ts 全站访问控制（未登录一律拦截）
 prisma/       schema.prisma 与迁移；本地 SQLite 为 prisma/dev.db（不入库）
 public/       Next.js 静态资源
 docker/       Docker 容器入口脚本
-tests/        单元测试
+tests/        单元测试；tests/e2e/ 为 Playwright 端到端（配置见 playwright.config.ts）
 ```
 
 ## 约定
