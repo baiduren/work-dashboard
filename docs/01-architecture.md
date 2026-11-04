@@ -85,6 +85,10 @@ docs/                   产品与设计文档（本目录）
   保存 PATCH、删除 DELETE `/api/tasks/:id`（Issue #41 起，删除入口带内联二次确认——
   确认态可撤销 / 超时复位，不用 `window.confirm`；204 关闭弹层、404 视为已删除、
   失败保留弹层；删除与保存互斥），成功后回调父级 `router.refresh()`；
+  拖拽排序的通用纯逻辑在 `components/drag-lists-form.ts`（多条列表的落点换算 / 乐观重排，
+  Issue #52 起看板与今日视图共用）；看板的 status 包装与逾期判断在
+  `components/kanban-form.ts`，dnd-kit 传感器 / 落点判定 / 列表容器等共享 UI 设施在
+  `components/sortable-lists.tsx`；
 - **lib/domain**：任务状态与排序等纯逻辑，可单测（`lib/domain/task.ts`：取值校验、
   completedAt 语义、看板移动计算、今日归类；日期边界可注入当前时间）；
   周回顾的周区间计算在 `lib/domain/review.ts`（Issue #44：`startOfWeek` /
@@ -114,6 +118,20 @@ docs/                   产品与设计文档（本目录）
 - `GET /api/tasks?view=today|overdue|undated|board|project[&projectId=…]` 返回列表
   （`board` 返回按状态分组的结构；`project` 必须带 `projectId`；`view` 缺失或非法 → 400）；
   今日 / 逾期视图的日期边界按**服务器时区**计算，部署默认 `Asia/Shanghai`，容器可用 `TZ` 覆盖；
+- 今日视图组内排序（Issue #52，`docs/00-product-brief.md`「核心场景 1 今日」）：
+  `today` / `overdue` / `undated` 三组各自独立，组内按
+  `orderIndex asc, dueDate asc, createdAt asc`（`orderIndex` 主导、日期兜底）。
+  排序载体**复用看板的列内 `orderIndex`**（不新增 schema 字段、不新增 migration）；
+  未手动排序的任务 `orderIndex` 即创建时追加到状态列尾的值，新任务因此出现在组内
+  同 `status` 任务末尾（组内混合 `status` 时受下述联动取舍影响）；日期兜底仅在同
+  `orderIndex` 时生效；
+  组内拖拽复用 `POST /api/tasks/:id/move`（body `{ status, orderIndex }`，API 零新增），
+  只做同组上下移动，跨组拖拽不触发（跨组重设 `dueDate` 属编辑弹层操作）。
+  取舍（联动而非独立存储）：今日顺序与看板列内顺序共用 `orderIndex`，在看板拖动同一任务
+  会同步改变其今日顺序，反之亦然；组内同时含 todo / doing 任务时 `orderIndex` 是
+  **状态列内**顺序，拖拽以任务自身 `status` 为目标列、按落点前同 `status` 任务数换算插入下标，
+  因此同 `status` 的组内拖拽精确落位，混合 `status` 的组只保证该任务在自身状态列中的相对位置；
+  不引入 `todayOrderIndex` 之类字段（Issue #52 约束）。
 - `POST /api/tasks`、`GET /api/tasks/:id`、`PATCH /api/tasks/:id`、`DELETE /api/tasks/:id`；
   各接口返回的任务对象（含 `GET /api/tasks?view=…` 各视图与 `POST /api/tasks` 的 201 响应）
   统一带 `tags: { id, name, color }[]`（按标签名升序，Issue #39；未绑定为 `[]`）；

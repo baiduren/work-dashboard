@@ -4,7 +4,15 @@
 // 取值规则复用 lib/domain/task.ts（parseTitle / DEFAULT_TASK_PRIORITY），
 // 不在前端重复实现服务端校验（docs/01-architecture.md「模块边界」）。
 
-import { DEFAULT_TASK_PRIORITY, parseTitle, type TaskPriority } from "@/lib/domain/task";
+import {
+  DEFAULT_TASK_PRIORITY,
+  parseStatus,
+  parseTitle,
+  type TaskPriority,
+  type TaskStatus,
+} from "@/lib/domain/task";
+
+import { moveItemInLists } from "./drag-lists-form";
 
 /** 快速添加发送给 POST /api/tasks 的请求体。 */
 export interface QuickAddPayload {
@@ -64,4 +72,66 @@ export async function apiErrorMessage(response: Response, fallback: string): Pro
     // 非 JSON 响应：走兜底文案
   }
   return fallback;
+}
+
+// ---------------------------------------------------------------------------
+// 今日组内排序（Issue #52）：复用看板的 orderIndex 与拖拽换算纯函数
+// ---------------------------------------------------------------------------
+
+/** 今日组内排序需要的最小任务字段（status 用于把组内落点换算回该任务 status 列的下标）。 */
+export interface TodaySortableTask {
+  id: string;
+  status: string;
+}
+
+/** 组内拖拽的移动请求体：与看板 POST /api/tasks/:id/move 同构（status 保持不变）。 */
+export interface TodayMoveTarget {
+  status: TaskStatus;
+  orderIndex: number;
+}
+
+/** 组内乐观重排：把被拖任务从组内原位置移除，再插入 `targetIndex`（越界收敛到组边界）。 */
+export function moveTaskInTodaySection<T extends TodaySortableTask>(
+  tasks: readonly T[],
+  activeId: string,
+  targetIndex: number,
+): T[] {
+  return moveItemInLists({ section: tasks }, activeId, {
+    listId: "section",
+    orderIndex: targetIndex,
+  }).section;
+}
+
+/**
+ * 把「组内落点下标」换算成 POST /move 的 body。
+ *
+ * 今日视图的组内顺序用 orderIndex 存储，但组内可能同时含 todo / doing 任务，
+ * 而 orderIndex 是**状态列内**的顺序。为了不改变任务状态（跨列移动不是本工单范围），
+ * 移动请求始终以被拖任务自己的 status 为目标列，插入下标 = 落点前与它同 status 的任务数。
+ * 同 status 的组内拖拽因此精确落位；混合 status 的组只保证该任务在自身状态列中的
+ * 相对位置（联动取舍见 docs/01-architecture.md「接口约定」）。
+ */
+export function computeTodayMoveTarget(
+  tasks: readonly TodaySortableTask[],
+  activeId: string,
+  targetIndex: number,
+): TodayMoveTarget | null {
+  const active = tasks.find((task) => task.id === activeId);
+  if (!active) return null;
+
+  let status: TaskStatus;
+  try {
+    status = parseStatus(active.status);
+  } catch {
+    return null;
+  }
+
+  const reordered = moveTaskInTodaySection(tasks, activeId, targetIndex);
+  const position = reordered.findIndex((task) => task.id === activeId);
+  if (position < 0) return null;
+
+  const sameStatusBefore = reordered
+    .slice(0, position)
+    .filter((task) => task.status === status).length;
+  return { status, orderIndex: sameStatusBefore };
 }

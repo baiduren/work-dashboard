@@ -1,13 +1,17 @@
-// 今日视图客户端交互纯逻辑的单测（Issue #25）：
+// 今日视图客户端交互纯逻辑的单测（Issue #25、Issue #52）：
 // 快速添加 payload 构造（标题裁剪/空白忽略/默认值）、本地日期格式化、
-// 日期输入的清空语义。取值规则来自 lib/domain/task.ts，这里验证其在 UI 层的接线。
+// 日期输入的清空语义；组内拖拽的落点 → /move body 换算与乐观重排。
+// 取值规则来自 lib/domain/task.ts，这里验证其在 UI 层的接线。
 
 import { describe, expect, it } from "vitest";
 
 import {
   buildQuickAddPayload,
+  computeTodayMoveTarget,
   dueDateInputToPatch,
   formatLocalDate,
+  moveTaskInTodaySection,
+  type TodaySortableTask,
 } from "@/components/today-form";
 
 describe("formatLocalDate", () => {
@@ -49,5 +53,77 @@ describe("dueDateInputToPatch", () => {
 
   it("日期字符串原样透传，由服务端校验可解析性", () => {
     expect(dueDateInputToPatch("2026-12-31")).toBe("2026-12-31");
+  });
+});
+
+// 组内拖拽（Issue #52）：今日组内顺序复用 orderIndex，移动请求与看板同构
+// （body { status, orderIndex }，插入下标语义为“移除被拖任务后的下标”）。
+function task(id: string, status: string): TodaySortableTask {
+  return { id, status };
+}
+
+describe("moveTaskInTodaySection", () => {
+  const tasks = [task("a", "todo"), task("b", "todo"), task("c", "todo")];
+
+  it("同组下移：a 落到下标 2 → [b, c, a]", () => {
+    expect(moveTaskInTodaySection(tasks, "a", 2).map((entry) => entry.id)).toEqual([
+      "b",
+      "c",
+      "a",
+    ]);
+  });
+
+  it("同组上移：c 落到下标 0 → [c, a, b]", () => {
+    expect(moveTaskInTodaySection(tasks, "c", 0).map((entry) => entry.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]);
+  });
+
+  it("越界下标收敛到组边界，不修改入参", () => {
+    expect(moveTaskInTodaySection(tasks, "a", 99).map((entry) => entry.id)).toEqual([
+      "b",
+      "c",
+      "a",
+    ]);
+    expect(moveTaskInTodaySection(tasks, "c", -5).map((entry) => entry.id)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]);
+    expect(tasks.map((entry) => entry.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("computeTodayMoveTarget", () => {
+  it("同 status 组：落点下标直接换算成该 status 列内插入下标（不移除自身时）", () => {
+    const tasks = [task("a", "todo"), task("b", "todo"), task("c", "todo")];
+    expect(computeTodayMoveTarget(tasks, "a", 2)).toEqual({ status: "todo", orderIndex: 2 });
+    expect(computeTodayMoveTarget(tasks, "c", 0)).toEqual({ status: "todo", orderIndex: 0 });
+    expect(computeTodayMoveTarget(tasks, "b", 1)).toEqual({ status: "todo", orderIndex: 1 });
+  });
+
+  it("混合 status 组：目标列保持任务自身 status，下标 = 落点前同 status 任务数", () => {
+    // 组内展示顺序 a(todo) / b(doing) / c(todo)；把 c 拖到最前：
+    // todo 列内它在 a 之前 → orderIndex 0；doing 任务的 status 不变。
+    const tasks = [task("a", "todo"), task("b", "doing"), task("c", "todo")];
+    expect(computeTodayMoveTarget(tasks, "c", 0)).toEqual({ status: "todo", orderIndex: 0 });
+    // 把 a 拖到 b 与 c 之间：落点前没有 todo 任务 → todo 列内 orderIndex 0。
+    expect(computeTodayMoveTarget(tasks, "a", 1)).toEqual({ status: "todo", orderIndex: 0 });
+  });
+
+  it("doing 任务只在自己 status 列内换算（不因组内落点改成 todo）", () => {
+    const tasks = [task("a", "todo"), task("b", "doing"), task("c", "doing")];
+    expect(computeTodayMoveTarget(tasks, "c", 0)).toEqual({ status: "doing", orderIndex: 0 });
+  });
+
+  it("被拖任务不在组内 / status 非法 / 越界下标 → 安全返回", () => {
+    expect(computeTodayMoveTarget([task("a", "todo")], "ghost", 0)).toBeNull();
+    expect(computeTodayMoveTarget([task("a", "paused")], "a", 0)).toBeNull();
+    expect(computeTodayMoveTarget([task("a", "todo")], "a", 99)).toEqual({
+      status: "todo",
+      orderIndex: 0,
+    });
   });
 });
