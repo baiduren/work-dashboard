@@ -48,6 +48,26 @@
 - [ ] 非 `application/json` 登录请求返回 400，超过 1KB 的请求体返回 413，
       错误响应不含堆栈或配置信息。
 
+## 退出登录验收（顶栏退出入口，Issue #49）
+
+依据：[00 产品概要](00-product-brief.md)「成功标准」——退出后会话失效；
+[ADR-0004](adr/0004-authentication.md) 的会话生命周期；Issue #12 交付的 `POST /api/auth/logout`（本工单不改 API）。
+
+- [ ] 登录后顶栏用户名旁出现「退出」轻量文字按钮（与导航同为 `text-neutral-500 hover:text-neutral-900`）；
+      未登录（登录页）不渲染；
+- [ ] 点击退出 → `POST /api/auth/logout`（200，服务端清除会话 Cookie）→
+      `window.location.assign("/login")` 整页跳转（不用 router.push）；
+- [ ] 退出后浏览器 Cookie 中 `wd_session` 已清除；HTTP 部署（`Secure=false`）同样能清除；
+- [ ] 退出后直接访问 `/`、`/board` 均 302 到 `/login?next=…`，
+      `GET /api/tasks?view=board` 返回 401（middleware 拦截生效）；
+- [ ] 退出失败（网络异常 / 非 2xx）时停留在当前页并短暂显示「退出失败，请重试」，
+      会话仍有效（刷新后仍可继续使用）；进行中按钮 disabled 防重复点击；
+- [ ] 退出后登录页顶栏不出现退出按钮；
+- [ ] `npm run lint` / `typecheck` / `test` / `build` 全绿；
+      `npm run e2e` 通过（`tests/e2e/logout.spec.ts`：登录 → 退出 → 登录页 → 直接访问被重定向，
+      另覆盖失败态不跳转）；
+- [ ] UI 变更附 Before / After 截图（顶栏退出按钮 + 退出后登录页，PR 描述用绝对地址引用）。
+
 ## 导出 / 导入验收（数据备份与完整恢复，Issue #37）
 
 - [ ] 未登录访问 `GET /api/export` / `POST /api/import` 返回 401（middleware 现有行为不变）；
