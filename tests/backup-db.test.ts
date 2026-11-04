@@ -12,6 +12,7 @@ import {
   type BackupTask,
 } from "../lib/db/backup";
 import { createTask, listTasks } from "../lib/db/tasks";
+import { listArchivedProjects, listProjects } from "../lib/db/projects";
 import { TaskValidationError } from "../lib/domain/task";
 
 // 数据备份层集成测试（Issue #37）：
@@ -290,6 +291,41 @@ describe("importAll 正常导入", () => {
     expect(counts).toEqual({ projects: 0, tasks: 0, tags: 0, taskTags: 0 });
     expect(await prisma.task.count()).toBe(0);
     expect(await prisma.project.count()).toBe(0);
+  });
+
+  it("归档项目 → 导出 → 清库 → 导入：archived 状态与任务归属完整恢复（Issue #43）", async () => {
+    const work = await prisma.project.create({ data: { name: "work" } });
+    const archived = await prisma.project.create({
+      data: { name: "old", color: "#ef4444", archived: true },
+    });
+    await prisma.task.create({
+      data: {
+        title: "归档项目里的任务",
+        status: "todo",
+        priority: "medium",
+        projectId: archived.id,
+        orderIndex: 0,
+      },
+    });
+
+    const backup = await exportAll();
+    await clearAll(); // 清库
+    expect(await prisma.project.count()).toBe(0);
+    expect(await prisma.task.count()).toBe(0);
+
+    const counts = await importAll(backup);
+    expect(counts).toEqual({ projects: 2, tasks: 1, tags: 0, taskTags: 0 });
+
+    // archived 状态保持；任务归属关系不变
+    const restoredArchived = await prisma.project.findUnique({ where: { id: archived.id } });
+    expect(restoredArchived?.archived).toBe(true);
+    expect(restoredArchived?.name).toBe("old");
+    const restoredTask = await prisma.task.findFirst();
+    expect(restoredTask?.projectId).toBe(archived.id);
+
+    // 列表语义恢复：归档项目只出现在已归档列表，未归档项目回到主列表
+    expect((await listProjects()).map((row) => row.id)).toEqual([work.id]);
+    expect((await listArchivedProjects()).map((row) => row.id)).toEqual([archived.id]);
   });
 });
 
