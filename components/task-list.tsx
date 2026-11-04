@@ -1,13 +1,16 @@
 "use client";
 
-// 任务行交互组件（Issue #25、Issue #27、Issue #39、docs/01-architecture.md「模块边界」）：
+// 任务行交互组件（Issue #25、Issue #27、Issue #39、Issue #50、docs/01-architecture.md「模块边界」）：
 // 展示标题、标签徽标、优先级标记与截止日期（统一 YYYY-MM-DD），并承接两个写操作入口：
-// - 点击行主体 → onEdit 打开编辑弹层（数据由父级 TodayBoard 持有）；
+// - 点击行主体 → onEdit 打开编辑弹层（数据由父级持有）；
 // - 「完成」按钮 → onComplete 调 PATCH /api/tasks/:id 设 status=done。
 // 组件本身只回调、不发请求；列表数据仍由 Server Component 查询后传入。
 // 只读形态（Issue #27，项目详情页复用）：不传 onEdit / onComplete 时行不可点击、
 // 无「完成」按钮；showStatus 为 true 时为进行中/已完成任务渲染状态徽标
 // （今日视图默认关闭，展示行为不变）。
+// 收件箱行内快捷归类（Issue #50）：父级传入 quickClassifyOptions + onQuickClassify 时，
+// 每行多一行「归类到 今天 / 明天 / 下周一」按钮（+「更多…」打开编辑弹层），
+// 其余视图不传该 prop，行结构之外的样式与行为不变。
 // 标签徽标（Issue #39）：彩色小圆点（ColorDot 风格）+ 名称，无标签不占位。
 
 import { ColorDot } from "@/components/color-dot";
@@ -18,6 +21,12 @@ export interface TaskTagItem {
   id: string;
   name: string;
   color: string | null;
+}
+
+/** 收件箱行内快捷归类的一个日期按钮（Issue #50）：文案 + 目标日期（浏览器本地 YYYY-MM-DD）。 */
+export interface QuickClassifyOption {
+  label: string;
+  dueDate: string;
 }
 
 export interface TaskListItem {
@@ -111,6 +120,9 @@ function TaskRow({
   showStatus,
   onEdit,
   onComplete,
+  quickClassifyOptions,
+  onQuickClassify,
+  classifying,
 }: {
   task: TaskListItem;
   overdue: boolean;
@@ -118,43 +130,87 @@ function TaskRow({
   showStatus?: boolean;
   onEdit?: (task: TaskListItem) => void;
   onComplete?: (task: TaskListItem) => void;
+  quickClassifyOptions?: readonly QuickClassifyOption[];
+  onQuickClassify?: (task: TaskListItem, dueDate: string) => void;
+  classifying?: boolean;
 }) {
   const interactive = onEdit !== undefined && onComplete !== undefined;
   return (
     <li
       className={
         overdue
-          ? "flex items-center justify-between gap-3 rounded-lg border border-l-4 border-red-200 border-l-red-500 bg-red-50 px-3 py-2.5"
-          : "flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-3 py-2.5"
+          ? "rounded-lg border border-l-4 border-red-200 border-l-red-500 bg-red-50 px-3 py-2.5"
+          : "rounded-lg border border-neutral-200 bg-white px-3 py-2.5"
       }
     >
-      {/* 可编辑视图：行主体可点击打开编辑弹层（键盘可用，原生 button）；
-          只读视图（项目详情页）：行主体为纯展示，不可点击。 */}
-      {interactive ? (
-        <button
-          type="button"
-          onClick={() => onEdit(task)}
-          aria-haspopup="dialog"
-          aria-label={`编辑任务：${task.title}`}
-          className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+      <div className="flex items-center justify-between gap-3">
+        {/* 可编辑视图：行主体可点击打开编辑弹层（键盘可用，原生 button）；
+            只读视图（项目详情页）：行主体为纯展示，不可点击。 */}
+        {interactive ? (
+          <button
+            type="button"
+            onClick={() => onEdit(task)}
+            aria-haspopup="dialog"
+            aria-label={`编辑任务：${task.title}`}
+            className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+          >
+            <RowContent task={task} overdue={overdue} showStatus={showStatus} />
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+            <RowContent task={task} overdue={overdue} showStatus={showStatus} />
+          </div>
+        )}
+        {onComplete ? (
+          <button
+            type="button"
+            onClick={() => onComplete(task)}
+            disabled={completing}
+            aria-label={`标记完成：${task.title}`}
+            className="shrink-0 rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {completing ? "完成中…" : "完成"}
+          </button>
+        ) : null}
+      </div>
+      {/* 行内快捷归类（Issue #50，仅收件箱传入）：今天 / 明天 / 下周一 一键设截止日期，
+          「更多…」打开编辑弹层选自定义日期 / 项目 / 优先级。 */}
+      {quickClassifyOptions && onQuickClassify ? (
+        <div
+          role="group"
+          aria-label={`快捷归类：${task.title}`}
+          className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-neutral-100 pt-2"
         >
-          <RowContent task={task} overdue={overdue} showStatus={showStatus} />
-        </button>
-      ) : (
-        <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-          <RowContent task={task} overdue={overdue} showStatus={showStatus} />
+          {classifying ? (
+            <span className="text-xs text-neutral-400">归类中…</span>
+          ) : (
+            <>
+              <span className="text-xs text-neutral-400">归类到</span>
+              {quickClassifyOptions.map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() => onQuickClassify(task, option.dueDate)}
+                  aria-label={`设为${option.label}：${task.title}`}
+                  className="rounded-md border border-neutral-200 bg-white px-2 py-0.5 text-xs font-medium text-neutral-600 hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+                >
+                  {option.label}
+                </button>
+              ))}
+              {onEdit ? (
+                <button
+                  type="button"
+                  onClick={() => onEdit(task)}
+                  aria-haspopup="dialog"
+                  aria-label={`更多归类方式：${task.title}`}
+                  className="px-1 text-xs text-neutral-500 underline underline-offset-2 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+                >
+                  更多…
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
-      )}
-      {onComplete ? (
-        <button
-          type="button"
-          onClick={() => onComplete(task)}
-          disabled={completing}
-          aria-label={`标记完成：${task.title}`}
-          className="shrink-0 rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {completing ? "完成中…" : "完成"}
-        </button>
       ) : null}
     </li>
   );
@@ -201,8 +257,10 @@ function RowContent({
 
 /**
  * 任务列表：`overdue` 为 true 时按「已逾期」醒目样式渲染（docs/00-product-brief.md「核心场景 1 今日」）。
- * 传入 onEdit + onComplete 为可编辑形态（今日视图）；两者都不传为只读形态（项目详情页），
- * 此时 showStatus 控制是否渲染进行中/已完成状态徽标。
+ * 传入 onEdit + onComplete 为可编辑形态（今日 / 收件箱视图）；两者都不传为只读形态
+ * （项目详情页 / 回顾页），此时 showStatus 控制是否渲染进行中/已完成状态徽标。
+ * 收件箱（Issue #50）额外传入 quickClassifyOptions + onQuickClassify，为每行渲染
+ * 今天 / 明天 / 下周一快捷归类按钮；其余视图不传，行为与样式不变。
  */
 export function TaskList({
   tasks,
@@ -211,6 +269,9 @@ export function TaskList({
   showStatus = false,
   onEdit,
   onComplete,
+  quickClassifyOptions,
+  onQuickClassify,
+  classifyingId,
 }: {
   tasks: readonly TaskListItem[];
   overdue?: boolean;
@@ -218,6 +279,12 @@ export function TaskList({
   showStatus?: boolean;
   onEdit?: (task: TaskListItem) => void;
   onComplete?: (task: TaskListItem) => void;
+  /** 收件箱行内快捷归类按钮（Issue #50）；不传则行内不渲染该区域。 */
+  quickClassifyOptions?: readonly QuickClassifyOption[];
+  /** 点击快捷归类按钮回调；dueDate 为按钮对应的目标日期（YYYY-MM-DD）。 */
+  onQuickClassify?: (task: TaskListItem, dueDate: string) => void;
+  /** 正在归类的任务 id（该行显示「归类中…」并暂不渲染快捷按钮）。 */
+  classifyingId?: string | null;
 }) {
   return (
     <ul className="space-y-2">
@@ -230,6 +297,9 @@ export function TaskList({
           showStatus={showStatus}
           onEdit={onEdit}
           onComplete={onComplete}
+          quickClassifyOptions={quickClassifyOptions}
+          onQuickClassify={onQuickClassify}
+          classifying={classifyingId === task.id}
         />
       ))}
     </ul>
