@@ -17,6 +17,7 @@
 ```
 app/                    Next.js 路由（页面与 route handlers）
   login/                登录页
+  inbox/                收件箱页（Issue #50，无日期任务集中收纳与归类）
   review/               周回顾页（Issue #44，按周查看完成任务）
   api/auth/             登录 / 退出接口
 components/             UI 组件（展示型，不直接访问数据库）
@@ -85,6 +86,11 @@ docs/                   产品与设计文档（本目录）
   保存 PATCH、删除 DELETE `/api/tasks/:id`（Issue #41 起，删除入口带内联二次确认——
   确认态可撤销 / 超时复位，不用 `window.confirm`；204 关闭弹层、404 视为已删除、
   失败保留弹层；删除与保存互斥），成功后回调父级 `router.refresh()`；
+  收件箱页（`app/inbox/page.tsx`，Issue #50）为 Server Component，查询复用
+  `listTasks("undated")`（与今日「待安排」组同一语义，不新建查询）；交互容器
+  `components/inbox-board.tsx` 与快速添加 `components/inbox-quick-add.tsx` 只调现有 HTTP API：
+  快速添加 payload 不带 dueDate（纯函数 `buildInboxQuickAddPayload` 在 `components/today-form.ts`），
+  行内「设为今天 / 明天 / 下周一」只 PATCH `dueDate`，归类弹层复用 EditTaskModal，零 API 改动；
 - **lib/domain**：任务状态与排序等纯逻辑，可单测（`lib/domain/task.ts`：取值校验、
   completedAt 语义、看板移动计算、今日归类；日期边界可注入当前时间）；
   周回顾的周区间计算在 `lib/domain/review.ts`（Issue #44：`startOfWeek` /
@@ -106,8 +112,12 @@ docs/                   产品与设计文档（本目录）
 
 ## 接口约定（草案）
 
-- 页面路由：`/`（今日）、`/board`（看板）、`/projects`（项目列表）、`/projects/[id]`（项目详情）、
-  `/review`（周回顾，Issue #44）。周回顾以 `?week=YYYY-MM-DD` 查询参数定位任意一周，
+- 页面路由：`/`（今日）、`/inbox`（收件箱，Issue #50）、`/board`（看板）、`/projects`（项目列表）、`/projects/[id]`（项目详情）、
+  `/review`（周回顾，Issue #44）。收件箱与今日「待安排」组分两个入口展示同一批任务，
+  查询均为 `listTasks("undated")`（无截止日期且未完成）；页面顶部快速添加不带 dueDate，
+  行内快捷归类（今天 / 明天 / 下周一）与编辑弹层归类都复用 `PATCH /api/tasks/:id` 的
+  `dueDate` / `projectId` / `priority` 字段（本工单 API 零改动）。周回顾以
+  `?week=YYYY-MM-DD` 查询参数定位任意一周，
   缺省本周，非法值（格式不对 / 不存在的日期）回退本周；周切换用链接驱动查询参数
   （Server Component 渲染，不引入客户端状态）；完成记录按
   `completedAt ∈ [周一 00:00, 下周一 00:00)`（本地时区，含头不含尾）查询并按天分组展示；
