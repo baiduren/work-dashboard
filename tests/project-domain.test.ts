@@ -88,11 +88,19 @@ describe("normalizeProjectPatch", () => {
     expect(normalizeProjectPatch({})).toEqual({});
   });
 
-  it("只挑选 name / color，其余字段一律忽略", () => {
+  it("只挑选 name / color / archived，其余字段一律忽略（Issue #43 起 archived 参与补丁）", () => {
     expect(
       normalizeProjectPatch({ name: " 新项目 ", color: "#ff0000", archived: true, id: "x" }),
-    ).toEqual({ name: "新项目", color: "#ff0000" });
-    expect(normalizeProjectPatch({ archived: true })).toEqual({});
+    ).toEqual({ name: "新项目", color: "#ff0000", archived: true });
+    expect(normalizeProjectPatch({ foo: "bar" })).toEqual({});
+  });
+
+  it("archived 必须是布尔值：true / false 通过，其余类型抛 TaskValidationError（field=archived）", () => {
+    expect(normalizeProjectPatch({ archived: true })).toEqual({ archived: true });
+    expect(normalizeProjectPatch({ archived: false })).toEqual({ archived: false });
+    for (const bad of ["true", 1, null]) {
+      expectValidationError(() => normalizeProjectPatch({ archived: bad }), "archived");
+    }
   });
 
   it("显式 color=null 表示清空；未提供的字段不出现在结果里", () => {

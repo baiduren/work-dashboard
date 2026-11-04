@@ -4,7 +4,15 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "../lib/db";
-import { createProject, getProject, listProjects, ProjectNotFoundError, updateProject } from "../lib/db/projects";
+import {
+  createProject,
+  deleteProject,
+  getProject,
+  listArchivedProjects,
+  listProjects,
+  ProjectNotFoundError,
+  updateProject,
+} from "../lib/db/projects";
 import { createTask, updateStatus } from "../lib/db/tasks";
 import { TaskValidationError } from "../lib/domain/task";
 
@@ -128,9 +136,38 @@ describe("updateProject", () => {
     expect(same.color).toBe("#ef4444");
   });
 
-  it("忽略补丁中的不可更新字段（如 archived）", async () => {
+  it("archived=true 归档 / false 恢复（Issue #43）", async () => {
     const project = await createProject({ name: "项目一" });
-    const updated = await updateProject(project.id, { archived: true } as never);
+    await createTask({ title: "项目里的任务", projectId: project.id }, NOW);
+
+    const archived = await updateProject(project.id, { archived: true });
+    expect(archived.archived).toBe(true);
+    // 归档后从主列表消失
+    expect((await listProjects()).map((row) => row.id)).not.toContain(project.id);
+
+    const restored = await updateProject(project.id, { archived: false });
+    expect(restored.archived).toBe(false);
+    expect(restored.name).toBe("项目一");
+    // 恢复后回到主列表
+    expect((await listProjects()).map((row) => row.id)).toContain(project.id);
+  });
+
+  it("archived 非布尔值 → TaskValidationError（field=archived）且不落库", async () => {
+    const project = await createProject({ name: "项目一" });
+    for (const bad of ["true", 1, null]) {
+      await expect(updateProject(project.id, { archived: bad as never })).rejects.toMatchObject({
+        name: "TaskValidationError",
+        field: "archived",
+      });
+    }
+    const after = await getProject(project.id);
+    expect(after?.archived).toBe(false);
+  });
+
+  it("忽略补丁中的未知字段（archived 已是可更新字段，其余未知字段仍忽略）", async () => {
+    const project = await createProject({ name: "项目一" });
+    const updated = await updateProject(project.id, { foo: "bar" } as never);
+    expect(updated.name).toBe("项目一");
     expect(updated.archived).toBe(false);
   });
 
@@ -155,6 +192,30 @@ describe("updateProject", () => {
       name: "ProjectNotFoundError",
       projectId: "no-such-id",
     });
+  });
+});
+
+describe("deleteProject", () => {
+  it("删除项目本身；其下任务保留且 projectId 置空（SetNull，不级联删任务）", async () => {
+    const project = await createProject({ name: "待删项目" });
+    const task = await createTask({ title: "项目里的任务", projectId: project.id }, NOW);
+
+    await deleteProject(project.id);
+
+    expect(await getProject(project.id)).toBeNull();
+    const remaining = await prisma.task.findUnique({ where: { id: task.id } });
+    expect(remaining).not.toBeNull();
+    expect(remaining?.title).toBe("项目里的任务");
+    expect(remaining?.projectId).toBeNull();
+  });
+
+  it("项目不存在时抛出 ProjectNotFoundError", async () => {
+    await expect(deleteProject("no-such-id")).rejects.toBeInstanceOf(ProjectNotFoundError);
+    await expect(deleteProject("no-such-id")).rejects.toMatchObject({
+      name: "ProjectNotFoundError",
+      projectId: "no-such-id",
+    });
+    expect(await prisma.project.count()).toBe(0);
   });
 });
 
@@ -183,7 +244,7 @@ describe("listProjects", () => {
 
   it("无任务的项目计数全 0；归档项目不出现在列表", async () => {
     const empty = await createProject({ name: "空项目" });
-    // archived 字段不在本工单的 API 范围内，直接经 Prisma 造已归档数据。
+    // 造一条已归档数据（列表只含未归档项目）
     await prisma.project.create({ data: { name: "已归档", archived: true } });
 
     const projects = await listProjects();
@@ -212,5 +273,43 @@ describe("listProjects", () => {
     await updateStatus(task.id, "done", NOW);
     const after = await listProjects();
     expect(after[0].counts).toEqual({ todo: 0, doing: 0, done: 1, total: 1 });
+  });
+});
+
+describe("listArchivedProjects", () => {
+  it("空库返回 []", async () => {
+    expect(await listArchivedProjects()).toEqual([]);
+  });
+
+  it("只返回 archived=true 的项目（按名称升序，含各状态任务计数）；未归档项目不出现", async () => {
+    const first = await prisma.project.create({ data: { name: "archived-a", archived: true } });
+    const second = await prisma.project.create({
+      data: { name: "archived-b", color: "#22c55e", archived: true },
+    });
+    const active = await createProject({ name: "active" });
+    await createTask({ title: "乙-待办", projectId: second.id }, NOW);
+    await createTask({ title: "乙-完成", projectId: second.id, status: "done" }, NOW);
+    await createTask({ title: "活跃任务", projectId: active.id }, NOW);
+
+    const archived = await listArchivedProjects();
+    expect(archived.map((row) => row.id)).toEqual([first.id, second.id]);
+    expect(archived[1]).toEqual({
+      id: second.id,
+      name: "archived-b",
+      color: "#22c55e",
+      counts: { todo: 1, doing: 0, done: 1, total: 2 },
+    });
+    expect(archived.map((row) => row.id)).not.toContain(active.id);
+  });
+
+  it("与 listProjects 互补：两列表并集等于全部项目", async () => {
+    const a = await createProject({ name: "活跃" });
+    const b = await prisma.project.create({ data: { name: "已归档", archived: true } });
+
+    const activeIds = (await listProjects()).map((row) => row.id);
+    const archivedIds = (await listArchivedProjects()).map((row) => row.id);
+    expect(activeIds).toEqual([a.id]);
+    expect(archivedIds).toEqual([b.id]);
+    expect([...activeIds, ...archivedIds].sort()).toEqual([a.id, b.id].sort());
   });
 });
