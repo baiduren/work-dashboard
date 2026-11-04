@@ -17,11 +17,12 @@
 ```
 app/                    Next.js 路由（页面与 route handlers）
   login/                登录页
+  review/               周回顾页（Issue #44，按周查看完成任务）
   api/auth/             登录 / 退出接口
 components/             UI 组件（展示型，不直接访问数据库）
 lib/
   auth/                 会话签名、校验、限流
-  domain/               领域逻辑（任务状态机、排序规则）
+  domain/               领域逻辑（任务状态机、排序规则、周区间计算）
   db/                   数据库访问层（Prisma client 封装）
 prisma/
   schema.prisma         数据模型与迁移
@@ -78,9 +79,14 @@ docs/                   产品与设计文档（本目录）
   失败保留弹层；删除与保存互斥），成功后回调父级 `router.refresh()`；
 - **lib/domain**：任务状态与排序等纯逻辑，可单测（`lib/domain/task.ts`：取值校验、
   completedAt 语义、看板移动计算、今日归类；日期边界可注入当前时间）；
+  周回顾的周区间计算在 `lib/domain/review.ts`（Issue #44：`startOfWeek` /
+  `weekRange` / `shiftWeek` / `parseWeekDate`，本地时区、`weekStartsOn` 参数化
+  便于测试、缺省周一）；
   项目取值校验在 `lib/domain/project.ts`（name 非空且 ≤60 字符、color 为 `#RRGGBB`
   或 null、patch 只允许 name/color）；
-- **lib/db**：唯一的数据访问入口（Prisma）；任务数据的读写函数在 `lib/db/tasks.ts`，
+- **lib/db**：唯一的数据访问入口（Prisma）；任务数据的读写函数在 `lib/db/tasks.ts`
+  （含周回顾查询 `listCompletedBetween`：`completedAt ∈ [from, to)` 含头不含尾、
+  按完成时间降序、不筛项目与状态，Issue #44），
   项目数据的读写函数在 `lib/db/projects.ts`（未归档 / 已归档项目列表 + 各状态任务计数；
   Issue #43 起 `deleteProject` 在事务内删除项目，其下任务 `projectId` 由 SetNull 置空），
   标签的读写与任务绑定在 `lib/db/tags.ts`（Issue #39：`setTaskTags` 事务内全量替换绑定，
@@ -92,6 +98,11 @@ docs/                   产品与设计文档（本目录）
 
 ## 接口约定（草案）
 
+- 页面路由：`/`（今日）、`/board`（看板）、`/projects`（项目列表）、`/projects/[id]`（项目详情）、
+  `/review`（周回顾，Issue #44）。周回顾以 `?week=YYYY-MM-DD` 查询参数定位任意一周，
+  缺省本周，非法值（格式不对 / 不存在的日期）回退本周；周切换用链接驱动查询参数
+  （Server Component 渲染，不引入客户端状态）；完成记录按
+  `completedAt ∈ [周一 00:00, 下周一 00:00)`（本地时区，含头不含尾）查询并按天分组展示；
 - `GET /api/tasks?view=today|overdue|undated|board|project[&projectId=…]` 返回列表
   （`board` 返回按状态分组的结构；`project` 必须带 `projectId`；`view` 缺失或非法 → 400）；
   今日 / 逾期视图的日期边界按**服务器时区**计算，部署默认 `Asia/Shanghai`，容器可用 `TZ` 覆盖；

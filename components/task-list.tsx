@@ -32,6 +32,10 @@ export interface TaskListItem {
   dueDate: Date | null;
   /** 所属项目 id（null = 无项目）；编辑弹层「所属项目」下拉预填用（Issue #27）。 */
   projectId: string | null;
+  /** 所属项目名（回顾页等只读场景传入，Issue #44）；未提供时不渲染、不占位。 */
+  projectName?: string;
+  /** 所属项目颜色（projectName 徽标圆点用色）；未提供时渲染中性灰点。 */
+  projectColor?: string | null;
   /** 绑定的标签摘要（按标签名升序）；未提供时不渲染徽标（Issue #39）。 */
   tags?: TaskTagItem[];
 }
@@ -83,6 +87,19 @@ function TagBadge({ tag }: { tag: TaskTagItem }) {
     >
       <ColorDot color={tag.color} />
       <span className="min-w-0 truncate">{tag.name}</span>
+    </span>
+  );
+}
+
+/** 所属项目徽标（Issue #44，回顾页传入 projectName 时渲染）：项目色圆点 + 名称；未提供不占位。 */
+function ProjectBadge({ name, color }: { name: string; color: string | null }) {
+  return (
+    <span
+      data-testid="project-badge"
+      className="inline-flex max-w-[9rem] shrink-0 items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 py-0.5 pl-1.5 pr-2 text-xs text-neutral-600"
+    >
+      <ColorDot color={color} />
+      <span className="min-w-0 truncate">{name}</span>
     </span>
   );
 }
@@ -163,6 +180,7 @@ function RowContent({
             ))}
           </span>
         ) : null}
+        {task.projectName ? <ProjectBadge name={task.projectName} color={task.projectColor ?? null} /> : null}
       </span>
       <span className="flex shrink-0 items-center gap-2">
         {showStatus ? <StatusBadge status={task.status} /> : null}
