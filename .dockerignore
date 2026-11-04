@@ -19,9 +19,9 @@ coverage
 .env.*
 !.env.example
 
-# 仅本地使用的文件
+# 构建阶段的 next build 会对全项目做类型检查（playwright.config.ts 引用 tests/e2e/env），
+# 因此 tests/ 需进入构建上下文；运行镜像（阶段 3）只 COPY 显式列出的目录，不会携带测试代码。
 docs
-tests
 *.log
 *.tmp
 *.bak

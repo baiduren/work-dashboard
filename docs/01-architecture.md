@@ -196,6 +196,9 @@ docs/                   产品与设计文档（本目录）
     `prisma migrate deploy` 并清空业务表，绝不触碰开发库 `prisma/dev.db`；
   - 失败保留截图与 trace（`test-results/`），HTML 报告在 `playwright-report/`，
     两者均被 .gitignore 忽略；
+  - 仅测试用途：Playwright 只在 devDependencies；Next.js 15 把它声明为 optional peer，
+    npm `--omit=dev` 仍会带入 devOptional 包，所以 Dockerfile 的 prod-deps 阶段显式移除，
+    运行镜像不含 Playwright 与浏览器二进制；
   - 命令：`npm run e2e`（首次先 `npm run e2e:install` 安装 chromium）；
   - 非目标：CI 接入、多浏览器矩阵、移动端视口、视觉回归（后续工单或按需补）。
 
