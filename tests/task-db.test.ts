@@ -514,6 +514,25 @@ describe("listTasks", () => {
     expect(undated.map((t) => t.title)).toEqual(["无日期"]);
   });
 
+  it("收件箱归类回归：不设日期进 undated，设为今天后转 today（Issue #50）", async () => {
+    // 收件箱快速添加（不带 dueDate）→ 任务落在 undated 视图，不出现在今日 / 逾期组。
+    const task = await createTask({ title: "随手记" }, NOW);
+    expect((await listTasks("undated", { now: NOW })).map((t) => t.id)).toEqual([task.id]);
+    expect((await listTasks("today", { now: NOW })).map((t) => t.id)).toEqual([]);
+    expect((await listTasks("overdue", { now: NOW })).map((t) => t.id)).toEqual([]);
+
+    // 「设为今天」只复用现有字段更新（PATCH dueDate），不新增查询语义：
+    // 任务从收件箱消失，出现在今日视图。
+    await updateTask(task.id, { dueDate: new Date(2026, 10, 2, 9, 0, 0) });
+    expect(await listTasks("undated", { now: NOW })).toEqual([]);
+    expect((await listTasks("today", { now: NOW })).map((t) => t.id)).toEqual([task.id]);
+
+    // 「设为明天」同样离开收件箱，且不属于今天 / 逾期组（未来日期只在对应日期出现）。
+    await updateTask(task.id, { dueDate: new Date(2026, 10, 3) });
+    expect(await listTasks("undated", { now: NOW })).toEqual([]);
+    expect((await listTasks("today", { now: NOW })).map((t) => t.id)).toEqual([]);
+  });
+
   it("视图查询与 classifyForToday 交叉验证一致", async () => {
     await createTask({ title: "t1", dueDate: new Date(2026, 10, 2, 8, 0, 0) }, NOW);
     await createTask({ title: "t2", dueDate: new Date(2026, 10, 2, 20, 0, 0) }, NOW);

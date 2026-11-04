@@ -38,6 +38,50 @@ export function buildQuickAddPayload(rawTitle: string, today: Date): QuickAddPay
   return { title, priority: DEFAULT_TASK_PRIORITY, dueDate: formatLocalDate(today) };
 }
 
+/** 收件箱快速添加发送给 POST /api/tasks 的请求体（Issue #50）：不带 dueDate —— 不传即无日期。 */
+export interface InboxQuickAddPayload {
+  title: string;
+  priority: TaskPriority;
+}
+
+/**
+ * 构造收件箱快速添加请求体（Issue #50，docs/00-product-brief.md「核心场景 2 收件箱」）：
+ * - 标题按 lib/domain 规则裁剪；空 / 纯空白输入返回 null（调用方直接忽略，不发请求）；
+ * - priority 取领域缺省值 medium；
+ * - 与今日快速添加的唯一差异：**不带 dueDate**——POST /api/tasks 不传即无日期
+ *   （docs/01-architecture.md「接口约定」），任务因此进入收件箱的 undated 查询。
+ */
+export function buildInboxQuickAddPayload(rawTitle: string): InboxQuickAddPayload | null {
+  let title: string;
+  try {
+    title = parseTitle(rawTitle);
+  } catch {
+    return null;
+  }
+  return { title, priority: DEFAULT_TASK_PRIORITY };
+}
+
+/** 收件箱行内快捷归类的日期档位（Issue #50）：今天 / 明天 / 下周一。 */
+export type QuickClassifyKind = "today" | "tomorrow" | "nextMonday";
+
+/**
+ * 收件箱行内快捷归类的目标日期（浏览器本地时区，YYYY-MM-DD，与快速添加同一格式约定）：
+ * - today：当天；tomorrow：次日（跨月 / 跨年由 Date 自动进位）；
+ * - nextMonday：严格“下一个周一”——今天周一时取 7 天后（不是今天），周日时取次日。
+ * 归类只改 dueDate（复用现有 PATCH /api/tasks/:id，不新增端点）。
+ */
+export function formatQuickClassifyDate(kind: QuickClassifyKind, now: Date): string {
+  const target = new Date(now.getTime());
+  if (kind === "tomorrow") {
+    target.setDate(target.getDate() + 1);
+  } else if (kind === "nextMonday") {
+    // getDay(): 0 = 周日 … 6 = 周六；(8 - day) % 7 得到到下周一的天数，
+    // 周一取 0 时用 || 7 兜底为下一个周一（7 天后）。
+    target.setDate(target.getDate() + ((8 - target.getDay()) % 7 || 7));
+  }
+  return formatLocalDate(target);
+}
+
 /** 本地时区的 YYYY-MM-DD（与截止日期展示同一格式，docs/02-acceptance.md）。 */
 export function formatLocalDate(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");

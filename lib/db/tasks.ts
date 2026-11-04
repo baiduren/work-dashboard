@@ -21,6 +21,7 @@ import {
   type TodayBucket,
 } from "@/lib/domain/task";
 import { parseTagIds } from "@/lib/domain/tag";
+import type { TaskFilters } from "@/lib/domain/task-filter";
 
 import { applyTaskTagsInTx } from "./tags";
 import { prisma } from "./index";
@@ -353,11 +354,32 @@ export type TaskListView = "today" | "overdue" | "undated" | "board" | "project"
 /** 看板视图：按状态分组，组内按 orderIndex。 */
 export type BoardView = Record<TaskStatus, TaskRecord[]>;
 
-export interface ListTasksOptions {
+export interface ListTasksOptions extends TaskFilters {
   /** today / overdue / undated 视图必需：归类所用的当前时间。 */
   now?: Date;
   /** project 视图必需：项目 id。 */
   projectId?: string;
+}
+
+/** 把可选筛选条件组装成 Prisma where（与各视图的既有条件按 AND 叠加，Issue #51）。 */
+function buildFilterWhere(filters: TaskFilters): Prisma.TaskWhereInput {
+  const where: Prisma.TaskWhereInput = {};
+  const q = filters.q?.trim();
+  if (q) {
+    // Prisma 的 contains 在 SQLite 下走 LIKE：ASCII 大小写不敏感，中文按原样子串包含（不分词）。
+    where.OR = [{ title: { contains: q } }, { notes: { contains: q } }];
+  }
+  if (filters.priority) where.priority = filters.priority;
+  if (filters.tagId !== undefined) where.tags = { some: { tagId: filters.tagId } };
+  return where;
+}
+
+/** tagId 必须指向真实标签；不存在时按接口约定抛 TaskValidationError（400「标签不存在」）。 */
+async function ensureTagExists(tagId: string): Promise<void> {
+  const tag = await prisma.tag.findUnique({ where: { id: tagId }, select: { id: true } });
+  if (!tag) {
+    throw new TaskValidationError("标签不存在", "tagId");
+  }
 }
 
 /**
@@ -383,6 +405,11 @@ export async function listTasks(
   view: TaskListView,
   options: ListTasksOptions = {},
 ): Promise<TaskRecord[] | BoardView> {
+  // 筛选条件在各视图内按 AND 叠加（Issue #51）：tagId 先校验存在性，非法时快速失败（400）。
+  if (options.tagId !== undefined) {
+    await ensureTagExists(options.tagId);
+  }
+  const filterWhere = buildFilterWhere(options);
   switch (view) {
     case "today":
     case "overdue":
@@ -390,15 +417,15 @@ export async function listTasks(
       if (!options.now) {
         throw new TaskValidationError(`${view} 视图必须提供 now（当前时间）`, "now");
       }
-      return listTodayBucket(view, options.now);
+      return listTodayBucket(view, options.now, filterWhere);
     }
     case "board":
-      return listBoard();
+      return listBoard(filterWhere);
     case "project": {
       if (!options.projectId) {
         throw new TaskValidationError("project 视图必须提供 projectId", "projectId");
       }
-      return listProject(options.projectId);
+      return listProject(options.projectId, filterWhere);
     }
     default:
       throw new TaskValidationError(`未知的任务视图：${String(view)}`, "view");
@@ -415,7 +442,11 @@ export async function listTasks(
  * 今日顺序（共用 orderIndex 的联动取舍，见 docs/01-architecture.md「接口约定」）。
  * 未手动排序过的任务 orderIndex 按创建顺序追加到列尾，仍按日期兜底稳定排列。
  */
-async function listTodayBucket(bucket: TodayBucket, now: Date): Promise<TaskRecord[]> {
+async function listTodayBucket(
+  bucket: TodayBucket,
+  now: Date,
+  filterWhere: Prisma.TaskWhereInput,
+): Promise<TaskRecord[]> {
   // orderIndex 是“列内顺序”，今日三组跨 todo/doing 时同值由日期/创建时间兜底（联动取舍见文档）。
   const commonOrderBy = [
     { orderIndex: "asc" as const },
@@ -424,7 +455,7 @@ async function listTodayBucket(bucket: TodayBucket, now: Date): Promise<TaskReco
   ];
   if (bucket === "undated") {
     const rows = await prisma.task.findMany({
-      where: { status: { not: "done" }, dueDate: null },
+      where: { status: { not: "done" }, dueDate: null, ...filterWhere },
       orderBy: [{ orderIndex: "asc" }, { createdAt: "asc" }],
       include: TASK_TAGS_INCLUDE,
     });
@@ -432,7 +463,7 @@ async function listTodayBucket(bucket: TodayBucket, now: Date): Promise<TaskReco
   }
   if (bucket === "overdue") {
     const rows = await prisma.task.findMany({
-      where: { status: { not: "done" }, dueDate: { lt: startOfDay(now) } },
+      where: { status: { not: "done" }, dueDate: { lt: startOfDay(now) }, ...filterWhere },
       orderBy: commonOrderBy,
       include: TASK_TAGS_INCLUDE,
     });
@@ -442,6 +473,7 @@ async function listTodayBucket(bucket: TodayBucket, now: Date): Promise<TaskReco
     where: {
       status: { not: "done" },
       dueDate: { gte: startOfDay(now), lte: endOfDay(now) },
+      ...filterWhere,
     },
     orderBy: commonOrderBy,
     include: TASK_TAGS_INCLUDE,
@@ -449,8 +481,9 @@ async function listTodayBucket(bucket: TodayBucket, now: Date): Promise<TaskReco
   return rows.map(toTaskRecord);
 }
 
-async function listBoard(): Promise<BoardView> {
+async function listBoard(filterWhere: Prisma.TaskWhereInput): Promise<BoardView> {
   const rows = await prisma.task.findMany({
+    where: filterWhere,
     orderBy: [{ orderIndex: "asc" }, { createdAt: "asc" }],
     include: TASK_TAGS_INCLUDE,
   });
@@ -461,9 +494,12 @@ async function listBoard(): Promise<BoardView> {
   return board;
 }
 
-async function listProject(projectId: string): Promise<TaskRecord[]> {
+async function listProject(
+  projectId: string,
+  filterWhere: Prisma.TaskWhereInput,
+): Promise<TaskRecord[]> {
   const rows = await prisma.task.findMany({
-    where: { projectId },
+    where: { projectId, ...filterWhere },
     orderBy: [{ orderIndex: "asc" }, { createdAt: "asc" }],
     include: TASK_TAGS_INCLUDE,
   });

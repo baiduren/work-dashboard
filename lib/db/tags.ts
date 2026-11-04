@@ -59,6 +59,15 @@ export async function listTags(): Promise<TagRecord[]> {
 }
 
 /**
+ * 标签是否存在（Issue #51 页面筛选容错：URL 中的 tagId 已失效时忽略该筛选，
+ * 避免手工改 URL 导致页面 500；API 侧仍按约定返回 400「标签不存在」）。
+ */
+export async function tagExists(id: string): Promise<boolean> {
+  const tag = await prisma.tag.findUnique({ where: { id }, select: { id: true } });
+  return tag !== null;
+}
+
+/**
  * 创建标签：name 必填（trim 后非空、≤24 字符），color 可选（#RRGGBB 或缺省 null）。
  * 重名（唯一约束）抛 TagValidationError（「标签名已存在」），调用方映射 400。
  */

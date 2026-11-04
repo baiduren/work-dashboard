@@ -17,6 +17,7 @@
 ```
 app/                    Next.js 路由（页面与 route handlers）
   login/                登录页
+  inbox/                收件箱页（Issue #50，无日期任务集中收纳与归类）
   review/               周回顾页（Issue #44，按周查看完成任务）
   api/auth/             登录 / 退出接口
 components/             UI 组件（展示型，不直接访问数据库）
@@ -89,6 +90,11 @@ docs/                   产品与设计文档（本目录）
   Issue #52 起看板与今日视图共用）；看板的 status 包装与逾期判断在
   `components/kanban-form.ts`，dnd-kit 传感器 / 落点判定 / 列表容器等共享 UI 设施在
   `components/sortable-lists.tsx`；
+  收件箱页（`app/inbox/page.tsx`，Issue #50）为 Server Component，查询复用
+  `listTasks("undated")`（与今日「待安排」组同一语义，不新建查询）；交互容器
+  `components/inbox-board.tsx` 与快速添加 `components/inbox-quick-add.tsx` 只调现有 HTTP API：
+  快速添加 payload 不带 dueDate（纯函数 `buildInboxQuickAddPayload` 在 `components/today-form.ts`），
+  行内「设为今天 / 明天 / 下周一」只 PATCH `dueDate`，归类弹层复用 EditTaskModal，零 API 改动；
 - **lib/domain**：任务状态与排序等纯逻辑，可单测（`lib/domain/task.ts`：取值校验、
   completedAt 语义、看板移动计算、今日归类；日期边界可注入当前时间）；
   周回顾的周区间计算在 `lib/domain/review.ts`（Issue #44：`startOfWeek` /
@@ -98,7 +104,8 @@ docs/                   产品与设计文档（本目录）
   或 null、patch 只允许 name/color）；
 - **lib/db**：唯一的数据访问入口（Prisma）；任务数据的读写函数在 `lib/db/tasks.ts`
   （含周回顾查询 `listCompletedBetween`：`completedAt ∈ [from, to)` 含头不含尾、
-  按完成时间降序、不筛项目与状态，Issue #44），
+  按完成时间降序、不筛项目与状态，Issue #44；Issue #51 起 `listTasks` 各视图支持
+  `q / priority / tagId` 筛选，where 条件在数据层组装、各视图按 AND 叠加），
   项目数据的读写函数在 `lib/db/projects.ts`（未归档 / 已归档项目列表 + 各状态任务计数；
   Issue #43 起 `deleteProject` 在事务内删除项目，其下任务 `projectId` 由 SetNull 置空），
   标签的读写与任务绑定在 `lib/db/tags.ts`（Issue #39：`setTaskTags` 事务内全量替换绑定，
@@ -110,13 +117,32 @@ docs/                   产品与设计文档（本目录）
 
 ## 接口约定（草案）
 
-- 页面路由：`/`（今日）、`/board`（看板）、`/projects`（项目列表）、`/projects/[id]`（项目详情）、
-  `/review`（周回顾，Issue #44）。周回顾以 `?week=YYYY-MM-DD` 查询参数定位任意一周，
+- 页面路由：`/`（今日）、`/inbox`（收件箱，Issue #50）、`/board`（看板）、`/projects`（项目列表）、`/projects/[id]`（项目详情）、
+  `/review`（周回顾，Issue #44）。收件箱与今日「待安排」组分两个入口展示同一批任务，
+  查询均为 `listTasks("undated")`（无截止日期且未完成）；页面顶部快速添加不带 dueDate，
+  行内快捷归类（今天 / 明天 / 下周一）与编辑弹层归类都复用 `PATCH /api/tasks/:id` 的
+  `dueDate` / `projectId` / `priority` 字段（本工单 API 零改动）。周回顾以
+  `?week=YYYY-MM-DD` 查询参数定位任意一周，
   缺省本周，非法值（格式不对 / 不存在的日期）回退本周；周切换用链接驱动查询参数
   （Server Component 渲染，不引入客户端状态）；完成记录按
   `completedAt ∈ [周一 00:00, 下周一 00:00)`（本地时区，含头不含尾）查询并按天分组展示；
-- `GET /api/tasks?view=today|overdue|undated|board|project[&projectId=…]` 返回列表
+- 今日 / 看板页提供服务端筛选栏（Issue #51，`components/task-filters.tsx`）：
+  `q / priority / tagId` 写入 URL searchParams（`router.replace`，保持可分享与可后退），
+  Server Component 按参数重新查询（force-dynamic 已就绪）；关键词输入防抖 300ms 或回车触发，
+  优先级 / 标签下拉即时生效，「清除筛选」一键复位。客户端只维护输入态、不本地过滤列表；
+  今日视图 Issue #39 的前端标签筛选作为轻量快捷方式保留。筛选中空结果显示「无匹配任务」，
+  与空库真空态区分；项目详情页不做筛选栏（项目内任务少，编辑弹层可查）；
+- `GET /api/tasks?view=today|overdue|undated|board|project[&projectId=…]`
+  `[&q=…][&priority=low|medium|high][&tagId=…]` 返回列表
   （`board` 返回按状态分组的结构；`project` 必须带 `projectId`；`view` 缺失或非法 → 400）；
+  可选筛选参数（Issue #51，可与任意 `view` 叠加、与现有视图条件按 AND 组合）：
+  - `q`：匹配 `title` / `notes` 的包含关系（大小写不敏感仅限 ASCII——SQLite `like` 行为；
+    中文按原样子串包含，不做分词）；空串 / 纯空白视为未提供；
+  - `priority`：`low | medium | high`，非法值 → 400；
+  - `tagId`：精确绑定该标签的任务（I 工单 #39 预留语义）；tagId 不存在 → 400，
+    固定文案「标签不存在」；
+  - `board` 视图的三列结构不变，筛选在各列内生效，列内 `orderIndex` 顺序保持；
+    参数全缺省时行为与未引入筛选前一致，响应结构不变（任务对象已带 `tags`）；
   今日 / 逾期视图的日期边界按**服务器时区**计算，部署默认 `Asia/Shanghai`，容器可用 `TZ` 覆盖；
 - 今日视图组内排序（Issue #52，`docs/00-product-brief.md`「核心场景 1 今日」）：
   `today` / `overdue` / `undated` 三组各自独立，组内按
