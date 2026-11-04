@@ -27,7 +27,7 @@ lib/
 prisma/
   schema.prisma         数据模型与迁移
 tests/                  单元测试（Vitest）
-  e2e/                  Playwright 端到端（核心旅程一条）
+  e2e/                  Playwright 端到端（核心旅程 + 退出登录）
 playwright.config.ts    E2E 配置（独立端口与测试库）
 middleware.ts           全局访问控制（未登录一律拦截）
 docs/                   产品与设计文档（本目录）
@@ -54,6 +54,11 @@ docs/                   产品与设计文档（本目录）
   密码比较使用恒定时间算法；登录请求体限定 `application/json` 且 ≤ 1KB，
   错误响应不含堆栈或配置信息；
 - 变更类请求校验 `Origin`/`Host` 一致，配合 `sameSite=lax` 防 CSRF；
+- 顶栏退出入口（Issue #49）：登录态在用户名旁渲染 Client Component
+  `components/logout-button.tsx` 的「退出」轻量文字按钮；点击调用已有的
+  `POST /api/auth/logout`，成功后 `window.location.assign("/login")` 整页跳转（清内存状态），
+  失败（网络异常 / 非 2xx）留在当前页短暂提示「退出失败，请重试」且会话仍有效；
+  进行中禁用防重复点击；未登录不渲染；不新增 API；
 - 不做用户表、注册、找回密码：单用户凭据只存在于部署环境变量。
 
 
@@ -199,7 +204,9 @@ docs/                   产品与设计文档（本目录）
   跑模块（不启动 Next、无浏览器）；覆盖数据层、领域纯逻辑、API route handler、
   认证与 middleware。命令 `npm run test`；
 - **Playwright（端到端）**：`tests/e2e/*.spec.ts`，一条核心旅程冒烟
-  （未登录重定向 → 错误密码 → 登录成功 → 快速添加 → 完成 → 看板 done 列 → 刷新后保持）：
+  （未登录重定向 → 错误密码 → 登录成功 → 快速添加 → 完成 → 看板 done 列 → 刷新后保持；
+  Issue #49 增加 `tests/e2e/logout.spec.ts`：登录 → 顶栏退出 → 登录页 + Cookie 清除 →
+  直接访问页面 / API 被拦截，并覆盖失败态不跳转）：
   - `playwright.config.ts` 的 webServer 用**生产构建**（`next start`）在独立端口
     **3100** 启动，与本地 `npm run dev`（3000）隔离；运行前需先 `npm run build`；
   - 凭据、会话密钥与数据库由 `tests/e2e/env.ts` 注入：独立测试账号 +

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { LogoutButton } from "@/components/logout-button";
 import { getCurrentUsername } from "@/lib/auth/current-user";
 
 import "./globals.css";
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
   description: "本地优先的个人任务工作台",
 };
 
-// 最小应用外壳（Issue #21；Issue #27 增加页面导航；Issue #31 增加「看板」导航；Issue #44 增加「回顾」导航）：
+// 最小应用外壳（Issue #21；Issue #27 增加页面导航；Issue #31 增加「看板」导航；Issue #44 增加「回顾」导航；Issue #49 增加「退出」入口）：
 // 登录后顶栏提供「今日 / 看板 / 项目 / 回顾」导航，
 // 未登录 / 会话无效（如登录页）时只显示应用名（导航随会话隐藏）。
 export default async function RootLayout({
@@ -56,9 +57,12 @@ export default async function RootLayout({
               ) : null}
             </div>
             {username ? (
-              <span className="max-w-[10rem] truncate text-sm text-neutral-500" title={username}>
-                {username}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="hidden max-w-[10rem] truncate text-sm text-neutral-500 sm:inline" title={username}>
+                  {username}
+                </span>
+                <LogoutButton />
+              </div>
             ) : null}
           </div>
         </header>
